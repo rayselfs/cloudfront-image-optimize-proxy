@@ -1,0 +1,16 @@
+apiVersion: v2
+name: image-optimize-proxy
+description: Image optimization proxy with imgproxy sidecar for on-the-fly image resizing
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+kubeVersion: ">=1.29.0-0"
+home: https://dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine
+sources:
+  - https://dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine?path=/packages/image-optimize-proxy
+maintainers:
+  - name: DevOps Team
+    email: ray.cj_chang@htc.com
+icon: https://helm.sh/img/helm.svg
+annotations:
+  licenses: Proprietary

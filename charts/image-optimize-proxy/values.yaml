@@ -1,0 +1,113 @@
+replicaCount: 2
+
+podAnnotations: {}
+
+# High-availability settings.
+# When enabled, injects podAntiAffinity (hostname-level) and
+# topologySpreadConstraints (zone-level) to spread pods across nodes and AZs.
+ha:
+  enabled: false
+  podAntiAffinity:
+    # true  → requiredDuringSchedulingIgnoredDuringExecution (strict, may block scheduling)
+    # false → preferredDuringSchedulingIgnoredDuringExecution (soft, weight 100)
+    required: false
+
+hpa:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: ""
+  behavior: {}
+    # scaleDown:
+    #   stabilizationWindowSeconds: 300
+    #   policies:
+    #   - type: Percent
+    #     value: 10
+    #     periodSeconds: 60
+
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  # maxUnavailable: 1  # mutually exclusive with minAvailable
+
+nodeSelector: {}
+
+tolerations: []
+
+# Merged with the HA-generated podAntiAffinity when ha.enabled is true.
+affinity: {}
+
+podSecurityContext: {}
+  # runAsNonRoot: true
+  # runAsUser: 1000
+  # fsGroup: 1000
+
+# securityContext for the proxy container.
+securityContext: {}
+  # allowPrivilegeEscalation: false
+  # capabilities:
+  #   drop: [ALL]
+  # readOnlyRootFilesystem: true
+
+revisionHistoryLimit: 1
+
+terminationGracePeriodSeconds: 30
+
+strategy: {}
+  # type: RollingUpdate
+  # rollingUpdate:
+  #   maxUnavailable: 0
+  #   maxSurge: 1
+
+# Lifecycle hooks for the proxy container.
+# Useful for graceful connection draining when behind a load balancer.
+lifecycle: {}
+  # preStop:
+  #   exec:
+  #     command: ["/bin/sh", "-c", "sleep 5"]
+
+image:
+  repository: image-optimize-proxy
+  tag: "v3.31.3"
+  pullPolicy: IfNotPresent
+
+imgproxy:
+  image:
+    repository: darthsim/imgproxy
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  securityContext: {}
+  resources:
+    requests:
+      cpu: 200m
+      memory: 256Mi
+    limits:
+      cpu: "1"
+      memory: 1Gi
+
+serviceAccount:
+  create: true
+  roleArn: "" # IRSA placeholder
+
+service:
+  type: LoadBalancer
+  port: 80
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: external
+    service.beta.kubernetes.io/aws-load-balancer-scheme: internal
+    service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+
+config:
+  listenAddr: ":8080"
+  cacheS3Bucket: ""
+  cacheS3Region: "us-east-1"
+  maxWidth: "1920"
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 512Mi

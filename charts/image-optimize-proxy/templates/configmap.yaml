@@ -1,0 +1,12 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "image-optimize-proxy.fullname" . }}
+  labels:
+    {{- include "image-optimize-proxy.labels" . | nindent 4 }}
+data:
+  LISTEN_ADDR: {{ .Values.config.listenAddr | quote }}
+  IMGPROXY_URL: "http://localhost:8081"
+  CACHE_S3_BUCKET: {{ .Values.config.cacheS3Bucket | quote }}
+  CACHE_S3_REGION: {{ .Values.config.cacheS3Region | quote }}
+  MAX_WIDTH: {{ .Values.config.maxWidth | quote }}

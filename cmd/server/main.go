@@ -1,0 +1,83 @@
+package main
+
+import (
+	"context"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"syscall"
+	"time"
+
+	"dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/cache"
+	"dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/coalesce"
+	appconfig "dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/config"
+	"dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/handler"
+	"dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/imgproxy"
+	"dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/middleware"
+	"dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/upstream"
+
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+)
+
+func main() {
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
+	slog.SetDefault(logger)
+	cfg, err := appconfig.Load()
+	if err != nil {
+		slog.Error("load config", "error", err)
+		os.Exit(1)
+	}
+
+	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background(), awsconfig.WithRegion(cfg.CacheS3Region))
+	if err != nil {
+		slog.Error("load aws config", "error", err)
+		os.Exit(1)
+	}
+
+	s3Cache := cache.NewS3Cache(s3.NewFromConfig(awsCfg), cfg.CacheS3Bucket)
+	imgproxyClient := imgproxy.NewClient(cfg.ImgproxyURL)
+	resolver := upstream.NewResolver()
+	coalescer := coalesce.New()
+	imageHandler := handler.New(s3Cache, imgproxyClient, resolver, coalescer, cfg.MaxWidth)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("ok"))
+	})
+	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	mux.Handle("/", imageHandler)
+
+	srv := &http.Server{
+		Addr:         cfg.ListenAddr,
+		Handler:      middleware.Logging(mux),
+		ReadTimeout:  30 * time.Second,
+		WriteTimeout: 60 * time.Second,
+		IdleTimeout:  120 * time.Second,
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+
+	go func() {
+		slog.Info("server starting", "addr", cfg.ListenAddr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			slog.Error("server error", "error", err)
+			os.Exit(1)
+		}
+	}()
+
+	<-ctx.Done()
+	slog.Info("shutting down")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := srv.Shutdown(shutdownCtx); err != nil {
+		slog.Error("shutdown error", "error", err)
+	}
+}
