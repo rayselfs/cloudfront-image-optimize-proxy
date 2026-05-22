@@ -67,15 +67,69 @@ S3/imgproxy responses via `net/http/httptest`.
 
 Deployed via the included Helm chart alongside an imgproxy sidecar container.
 
-```bash
-helm install image-optimize-proxy ./charts/image-optimize-proxy \
-  --set config.cacheS3Bucket=my-image-cache-bucket \
-  --set config.cacheS3Region=us-west-2
+### Prerequisites
+
+**IRSA (IAM Roles for Service Accounts)** is required for the proxy to read/write the S3 cache
+bucket. Create an IAM role with the following policy and annotate the ServiceAccount via
+`serviceAccount.roleArn`.
+
+Minimum IAM policy for the cache bucket:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject"
+      ],
+      "Resource": "arn:aws:s3:::<cache-bucket>/*"
+    }
+  ]
+}
 ```
 
-Key Helm values: `config.cacheS3Bucket`, `config.cacheS3Region`, `image.repository`, `image.tag`.
-See [`charts/image-optimize-proxy/values.yaml`](charts/image-optimize-proxy/values.yaml) for the
-full reference.
+> If the source images are also in S3 (i.e. `X-Img-Source-Type: s3` requests), the proxy
+> presigns GetObject URLs for the source bucket using the same role. Add a separate statement:
+>
+> ```json
+> {
+>   "Effect": "Allow",
+>   "Action": "s3:GetObject",
+>   "Resource": "arn:aws:s3:::<source-bucket>/*"
+> }
+> ```
+
+### Install from local chart
+
+```bash
+helm install image-optimize-proxy ./charts/image-optimize-proxy \
+  --set image.repository=ghcr.io/{owner}/image-optimize-proxy \
+  --set image.tag={version} \
+  --set config.cacheS3Bucket=my-image-cache-bucket \
+  --set config.cacheS3Region=us-east-1 \
+  --set serviceAccount.roleArn=arn:aws:iam::{account-id}:role/{role-name}
+```
+
+### Install from OCI registry
+
+```bash
+helm install image-optimize-proxy \
+  oci://ghcr.io/{owner}/charts/image-optimize-proxy \
+  --version {version} \
+  --set image.repository=ghcr.io/{owner}/image-optimize-proxy \
+  --set image.tag={version} \
+  --set config.cacheS3Bucket=my-image-cache-bucket \
+  --set config.cacheS3Region=us-east-1 \
+  --set serviceAccount.roleArn=arn:aws:iam::{account-id}:role/{role-name}
+```
+
+Key Helm values: `config.cacheS3Bucket`, `config.cacheS3Region`, `image.repository`, `image.tag`,
+`serviceAccount.roleArn`. See
+[`charts/image-optimize-proxy/values.yaml`](charts/image-optimize-proxy/values.yaml) for the full
+reference.
 
 The chart creates an internal AWS NLB via `service.beta.kubernetes.io/aws-load-balancer-*`
 annotations. **IRSA** (IAM Roles for Service Accounts) is required for S3 access — set
@@ -87,9 +141,3 @@ annotations. **IRSA** (IAM Roles for Service Accounts) is required for S3 access
 |---|---|
 | Docker image | `ghcr.io/{owner}/image-optimize-proxy:{tag}` |
 | Helm chart | `oci://ghcr.io/{owner}/charts/image-optimize-proxy:{version}` |
-
-Pull the Helm chart:
-
-```bash
-helm pull oci://ghcr.io/{owner}/charts/image-optimize-proxy --version {version}
-```

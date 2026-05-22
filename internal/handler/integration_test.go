@@ -9,6 +9,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/cache"
 	"dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/coalesce"
@@ -96,8 +97,8 @@ func TestIntegrationImageOptimizationFlow(t *testing.T) {
 	s3Cache := cache.NewS3Cache(newIntegrationMockS3(), "test-bucket")
 	h := New(
 		s3Cache,
-		imgproxy.NewClient(imgproxyServer.URL),
-		upstream.NewResolver(),
+		imgproxy.NewClient(imgproxyServer.URL, 30*time.Second),
+		upstream.NewResolver(30 * time.Second),
 		coalesce.New(),
 		1920,
 	)

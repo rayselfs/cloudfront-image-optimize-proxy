@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 )
 
 // TransformParams holds parameters for image transformation.
@@ -25,11 +26,11 @@ type Client struct {
 	httpClient *http.Client
 }
 
-// NewClient creates a new imgproxy Client with the given base URL.
-func NewClient(baseURL string) *Client {
+// NewClient creates a new imgproxy Client with the given base URL and HTTP timeout.
+func NewClient(baseURL string, timeout time.Duration) *Client {
 	return &Client{
 		baseURL:    baseURL,
-		httpClient: &http.Client{},
+		httpClient: &http.Client{Timeout: timeout},
 	}
 }
 

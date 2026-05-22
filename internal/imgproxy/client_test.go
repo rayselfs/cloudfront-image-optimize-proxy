@@ -39,7 +39,7 @@ func TestTransformSuccess(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL)
+	c := NewClient(srv.URL, 30*time.Second)
 	body, ct, err := c.Transform(context.Background(), "http://origin/img.png", TransformParams{Width: 800, Format: "webp", Quality: 85})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -62,7 +62,7 @@ func TestTransformError(t *testing.T) {
 	}))
 	defer srv.Close()
 
-	c := NewClient(srv.URL)
+	c := NewClient(srv.URL, 30*time.Second)
 	body, _, err := c.Transform(context.Background(), "http://origin/img.png", TransformParams{Width: 800, Format: "webp", Quality: 85})
 	if err == nil {
 		body.Close()
@@ -83,7 +83,7 @@ func TestTransformTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 	defer cancel()
 
-	c := NewClient(srv.URL)
+	c := NewClient(srv.URL, 30*time.Second)
 	_, _, err := c.Transform(ctx, "http://origin/img.png", TransformParams{Width: 800, Format: "webp", Quality: 85})
 	if err == nil {
 		t.Fatal("expected timeout error, got nil")

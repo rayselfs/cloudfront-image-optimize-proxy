@@ -37,15 +37,35 @@ func main() {
 	}
 
 	s3Cache := cache.NewS3Cache(s3.NewFromConfig(awsCfg), cfg.CacheS3Bucket)
-	imgproxyClient := imgproxy.NewClient(cfg.ImgproxyURL)
-	resolver := upstream.NewResolver()
+	imgproxyClient := imgproxy.NewClient(cfg.ImgproxyURL, cfg.ImgproxyTimeout)
+	resolver := upstream.NewResolver(cfg.UpstreamTimeout)
 	coalescer := coalesce.New()
 	imageHandler := handler.New(s3Cache, imgproxyClient, resolver, coalescer, cfg.MaxWidth)
+
+	readyClient := &http.Client{Timeout: 2 * time.Second}
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("ok"))
+		_, _ = w.Write([]byte("ok"))
+	})
+	mux.HandleFunc("GET /ready", func(w http.ResponseWriter, r *http.Request) {
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, cfg.ImgproxyURL+"/health", nil)
+		if err != nil {
+			http.Error(w, "imgproxy not ready", http.StatusServiceUnavailable)
+			return
+		}
+		resp, err := readyClient.Do(req)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			if resp != nil {
+				resp.Body.Close()
+			}
+			http.Error(w, "imgproxy not ready", http.StatusServiceUnavailable)
+			return
+		}
+		resp.Body.Close()
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
 	})
 	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

@@ -5,37 +5,54 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"time"
 )
 
 const (
-	defaultListenAddr    = ":9999"
-	defaultImgproxyURL   = "http://localhost:8081"
-	defaultCacheS3Region = "us-west-2"
-	defaultMaxWidth      = 1920
+	defaultListenAddr      = ":9999"
+	defaultImgproxyURL     = "http://localhost:8081"
+	defaultCacheS3Region   = "us-west-2"
+	defaultMaxWidth        = 1920
+	defaultUpstreamTimeout = 30 * time.Second
+	defaultImgproxyTimeout = 30 * time.Second
 )
 
 // Config holds the service configuration loaded from environment variables.
 type Config struct {
-	ListenAddr    string
-	ImgproxyURL   string
-	CacheS3Bucket string
-	CacheS3Region string
-	MaxWidth      int
+	ListenAddr      string
+	ImgproxyURL     string
+	CacheS3Bucket   string
+	CacheS3Region   string
+	MaxWidth        int
+	UpstreamTimeout time.Duration
+	ImgproxyTimeout time.Duration
 }
 
 // Load reads service configuration from environment variables.
 func Load() (*Config, error) {
-	maxWidth, err := loadMaxWidth()
+	maxWidth, err := loadPositiveInt("MAX_WIDTH", defaultMaxWidth)
+	if err != nil {
+		return nil, err
+	}
+
+	upstreamTimeout, err := loadDurationSeconds("UPSTREAM_TIMEOUT", defaultUpstreamTimeout)
+	if err != nil {
+		return nil, err
+	}
+
+	imgproxyTimeout, err := loadDurationSeconds("IMGPROXY_TIMEOUT", defaultImgproxyTimeout)
 	if err != nil {
 		return nil, err
 	}
 
 	cfg := &Config{
-		ListenAddr:    envOrDefault("LISTEN_ADDR", defaultListenAddr),
-		ImgproxyURL:   envOrDefault("IMGPROXY_URL", defaultImgproxyURL),
-		CacheS3Bucket: strings.TrimSpace(os.Getenv("CACHE_S3_BUCKET")),
-		CacheS3Region: envOrDefault("CACHE_S3_REGION", defaultCacheS3Region),
-		MaxWidth:      maxWidth,
+		ListenAddr:      envOrDefault("LISTEN_ADDR", defaultListenAddr),
+		ImgproxyURL:     envOrDefault("IMGPROXY_URL", defaultImgproxyURL),
+		CacheS3Bucket:   strings.TrimSpace(os.Getenv("CACHE_S3_BUCKET")),
+		CacheS3Region:   envOrDefault("CACHE_S3_REGION", defaultCacheS3Region),
+		MaxWidth:        maxWidth,
+		UpstreamTimeout: upstreamTimeout,
+		ImgproxyTimeout: imgproxyTimeout,
 	}
 
 	if cfg.CacheS3Bucket == "" {
@@ -53,19 +70,36 @@ func envOrDefault(name, fallback string) string {
 	return value
 }
 
-func loadMaxWidth() (int, error) {
-	value := strings.TrimSpace(os.Getenv("MAX_WIDTH"))
+func loadPositiveInt(name string, fallback int) (int, error) {
+	value := strings.TrimSpace(os.Getenv(name))
 	if value == "" {
-		return defaultMaxWidth, nil
+		return fallback, nil
 	}
 
-	maxWidth, err := strconv.Atoi(value)
+	n, err := strconv.Atoi(value)
 	if err != nil {
-		return 0, fmt.Errorf("MAX_WIDTH must be an integer: %w", err)
+		return 0, fmt.Errorf("%s must be an integer: %w", name, err)
 	}
-	if maxWidth <= 0 {
-		return 0, fmt.Errorf("MAX_WIDTH must be greater than zero")
+	if n <= 0 {
+		return 0, fmt.Errorf("%s must be greater than zero", name)
 	}
 
-	return maxWidth, nil
+	return n, nil
+}
+
+func loadDurationSeconds(name string, fallback time.Duration) (time.Duration, error) {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback, nil
+	}
+
+	secs, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an integer (seconds): %w", name, err)
+	}
+	if secs <= 0 {
+		return 0, fmt.Errorf("%s must be greater than zero", name)
+	}
+
+	return time.Duration(secs) * time.Second, nil
 }

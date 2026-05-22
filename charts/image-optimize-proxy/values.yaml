@@ -75,7 +75,7 @@ image:
 imgproxy:
   image:
     repository: darthsim/imgproxy
-    tag: "latest"
+    tag: "v3.31.3"
     pullPolicy: IfNotPresent
   securityContext: {}
   resources:
@@ -103,6 +103,8 @@ config:
   cacheS3Bucket: ""
   cacheS3Region: "us-east-1"
   maxWidth: "1920"
+  upstreamTimeout: "30"
+  imgproxyTimeout: "30"
 
 resources:
   requests:

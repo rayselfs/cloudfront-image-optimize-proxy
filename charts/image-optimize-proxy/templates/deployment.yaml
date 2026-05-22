@@ -75,7 +75,7 @@ spec:
             periodSeconds: 15
           readinessProbe:
             httpGet:
-              path: /health
+              path: /ready
               port: http
             initialDelaySeconds: 5
             periodSeconds: 10
@@ -95,5 +95,17 @@ spec:
           env:
             - name: IMGPROXY_BIND
               value: ":8081"
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: imgproxy
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: imgproxy
+            initialDelaySeconds: 5
+            periodSeconds: 10
           resources:
             {{- toYaml .Values.imgproxy.resources | nindent 12 }}

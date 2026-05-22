@@ -3,8 +3,9 @@ package handler
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
-	"log"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -62,14 +63,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return h.process(r, key, params)
 	})
 	if err != nil {
-		log.Printf("handler: process request: %v", err)
+		slog.Error("handler: process request", "error", err)
 		h.writeError(w)
 		return
 	}
 
 	result, ok := value.(processResult)
 	if !ok {
-		log.Printf("handler: unexpected coalescer result type %T", value)
+		slog.Error("handler: unexpected coalescer result type", "type", fmt.Sprintf("%T", value))
 		h.writeError(w)
 		return
 	}
@@ -79,14 +80,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) passThrough(w http.ResponseWriter, r *http.Request) {
 	_, fetchFunc, err := h.Resolver.Resolve(r)
 	if err != nil {
-		log.Printf("handler: resolve pass-through: %v", err)
+		slog.Error("handler: resolve pass-through", "error", err)
 		h.writeError(w)
 		return
 	}
 
 	body, contentType, err := fetchFunc()
 	if err != nil {
-		log.Printf("handler: fetch pass-through: %v", err)
+		slog.Error("handler: fetch pass-through", "error", err)
 		h.writeError(w)
 		return
 	}
@@ -96,7 +97,7 @@ func (h *Handler) passThrough(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", contentType)
 	}
 	if _, err := io.Copy(w, body); err != nil {
-		log.Printf("handler: write pass-through: %v", err)
+		slog.Error("handler: write pass-through", "error", err)
 	}
 }
 
@@ -109,7 +110,7 @@ func (h *Handler) process(r *http.Request, key string, params *ImageParams) (pro
 		}
 		return processResult{body: data, contentType: contentType, cacheStatus: "HIT"}, nil
 	} else if !errors.Is(err, cache.ErrNotFound) {
-		log.Printf("handler: cache get %q: %v", key, err)
+		slog.Error("handler: cache get", "key", key, "error", err)
 	}
 
 	sourceURL, fetchFunc, err := h.Resolver.Resolve(r)
@@ -137,7 +138,7 @@ func (h *Handler) process(r *http.Request, key string, params *ImageParams) (pro
 		Quality: params.Quality,
 	})
 	if err != nil {
-		log.Printf("handler: transform %q: %v", sourceURL, err)
+		slog.Error("handler: transform", "source_url", sourceURL, "error", err)
 		fallbackBody, fallbackContentType, fetchErr := fetchFunc()
 		if fetchErr != nil {
 			return processResult{}, fetchErr
@@ -156,7 +157,7 @@ func (h *Handler) process(r *http.Request, key string, params *ImageParams) (pro
 		return processResult{}, err
 	}
 	if err := h.Cache.Put(r.Context(), key, bytes.NewReader(data), transformedContentType); err != nil {
-		log.Printf("handler: cache put %q: %v", key, err)
+		slog.Error("handler: cache put", "key", key, "error", err)
 	}
 
 	return processResult{body: data, contentType: transformedContentType, cacheStatus: "MISS"}, nil
