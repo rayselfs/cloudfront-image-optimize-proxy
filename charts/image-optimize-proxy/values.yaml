@@ -75,7 +75,7 @@ image:
 imgproxy:
   image:
     repository: darthsim/imgproxy
-    tag: "latest"
+    tag: "v3.27.0"
     pullPolicy: IfNotPresent
   securityContext: {}
   resources:

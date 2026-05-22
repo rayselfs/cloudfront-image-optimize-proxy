@@ -6,12 +6,17 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
+
+var httpClient = &http.Client{
+	Timeout: 30 * time.Second,
+}
 
 // Resolver determines the upstream source for an image.
 type Resolver interface {
@@ -101,7 +106,7 @@ func fetchHTTP(ctx context.Context, url, host string) (io.ReadCloser, string, er
 		req.Host = host
 	}
 
-	res, err := http.DefaultClient.Do(req)
+	res, err := httpClient.Do(req)
 	if err != nil {
 		return nil, "", err
 	}
