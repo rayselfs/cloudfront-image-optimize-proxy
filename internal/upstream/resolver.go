@@ -14,10 +14,6 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
-var httpClient = &http.Client{
-	Timeout: 30 * time.Second,
-}
-
 // Resolver determines the upstream source for an image.
 type Resolver interface {
 	Resolve(r *http.Request) (sourceURL string, fetchFunc func() (io.ReadCloser, string, error), err error)
@@ -36,11 +32,15 @@ var newS3Presigner = func(ctx context.Context) (s3Presigner, error) {
 }
 
 // DefaultResolver resolves image sources from either S3 or the upstream gateway.
-type DefaultResolver struct{}
+type DefaultResolver struct {
+	httpClient *http.Client
+}
 
-// NewResolver creates the default upstream resolver.
-func NewResolver() *DefaultResolver {
-	return &DefaultResolver{}
+// NewResolver creates the default upstream resolver with the given HTTP timeout.
+func NewResolver(timeout time.Duration) *DefaultResolver {
+	return &DefaultResolver{
+		httpClient: &http.Client{Timeout: timeout},
+	}
 }
 
 // Resolve returns the source URL that imgproxy should read and a fallback fetch function.
@@ -56,7 +56,7 @@ func (d *DefaultResolver) Resolve(r *http.Request) (string, func() (io.ReadClose
 
 	sourceURL := "http://" + gateway + requestURI(r)
 	fetchFunc := func() (io.ReadCloser, string, error) {
-		return fetchHTTP(r.Context(), sourceURL, r.Host)
+		return d.fetchHTTP(r.Context(), sourceURL, r.Host)
 	}
 
 	return sourceURL, fetchFunc, nil
@@ -83,7 +83,7 @@ func (d *DefaultResolver) resolveS3(r *http.Request) (string, func() (io.ReadClo
 
 	sourceURL := presigned.URL
 	fetchFunc := func() (io.ReadCloser, string, error) {
-		return fetchHTTP(r.Context(), sourceURL, "")
+		return d.fetchHTTP(r.Context(), sourceURL, "")
 	}
 
 	return sourceURL, fetchFunc, nil
@@ -97,7 +97,7 @@ func requestURI(r *http.Request) string {
 	return uri
 }
 
-func fetchHTTP(ctx context.Context, url, host string) (io.ReadCloser, string, error) {
+func (d *DefaultResolver) fetchHTTP(ctx context.Context, url, host string) (io.ReadCloser, string, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, "", err
@@ -106,7 +106,7 @@ func fetchHTTP(ctx context.Context, url, host string) (io.ReadCloser, string, er
 		req.Host = host
 	}
 
-	res, err := httpClient.Do(req)
+	res, err := d.httpClient.Do(req)
 	if err != nil {
 		return nil, "", err
 	}

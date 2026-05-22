@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
@@ -57,7 +58,7 @@ func TestResolveS3(t *testing.T) {
 	req.Header.Set("X-Img-Source-Type", "s3")
 	req.Header.Set("X-Img-Source-Bucket", "source-bucket")
 
-	sourceURL, fetchFunc, err := NewResolver().Resolve(req)
+	sourceURL, fetchFunc, err := NewResolver(30 * time.Second).Resolve(req)
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
@@ -100,7 +101,7 @@ func TestResolveGatewayFromHeader(t *testing.T) {
 	req.Host = "assets.example"
 	req.Header.Set("X-Img-Upstream-Gateway", server.URL)
 
-	sourceURL, fetchFunc, err := NewResolver().Resolve(req)
+	sourceURL, fetchFunc, err := NewResolver(30 * time.Second).Resolve(req)
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
@@ -132,7 +133,7 @@ func TestResolveGatewayFromHeader(t *testing.T) {
 func TestResolveGatewayMissingHeader(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://assets.example/images/cat.jpg", nil)
 
-	_, _, err := NewResolver().Resolve(req)
+	_, _, err := NewResolver(30 * time.Second).Resolve(req)
 	if err == nil {
 		t.Fatal("Resolve() error = nil, want error for missing X-Img-Upstream-Gateway")
 	}

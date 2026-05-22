@@ -10,3 +10,5 @@ data:
   CACHE_S3_BUCKET: {{ .Values.config.cacheS3Bucket | quote }}
   CACHE_S3_REGION: {{ .Values.config.cacheS3Region | quote }}
   MAX_WIDTH: {{ .Values.config.maxWidth | quote }}
+  UPSTREAM_TIMEOUT: {{ .Values.config.upstreamTimeout | quote }}
+  IMGPROXY_TIMEOUT: {{ .Values.config.imgproxyTimeout | quote }}
