@@ -9,10 +9,10 @@ import (
 	"net/http"
 	"strings"
 
-	"dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/cache"
-	"dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/coalesce"
-	"dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/imgproxy"
-	"dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/upstream"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/cache"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/coalesce"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/imgproxy"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/upstream"
 )
 
 // Handler is the main image optimization HTTP handler.
@@ -138,7 +138,11 @@ func (h *Handler) process(r *http.Request, key string, params *ImageParams) (pro
 		Quality: params.Quality,
 	})
 	if err != nil {
-		slog.Error("handler: transform", "source_url", sourceURL, "error", err)
+		slog.Error("handler: transform failed, using original",
+			"error", err,
+			"path", r.URL.Path,
+			"cache_key", key,
+		)
 		fallbackBody, fallbackContentType, fetchErr := fetchFunc()
 		if fetchErr != nil {
 			return processResult{}, fetchErr
