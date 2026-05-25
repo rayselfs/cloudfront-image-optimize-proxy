@@ -147,3 +147,65 @@ func assertRequest(t *testing.T, h http.Handler, target, gatewayURL, wantBody, w
 		}
 	}
 }
+
+func TestIntegrationImgproxyFallback(t *testing.T) {
+	const (
+		originalImage = "original-image-bytes"
+	)
+
+	var imgproxyCalls int
+	imgproxyServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		imgproxyCalls++
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write([]byte("imgproxy error"))
+	}))
+	defer imgproxyServer.Close()
+
+	var upstreamCalls int
+	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		upstreamCalls++
+		w.Header().Set("Content-Type", "image/jpeg")
+		_, _ = w.Write([]byte(originalImage))
+	}))
+	defer upstreamServer.Close()
+
+	mockCache := newIntegrationMockS3()
+	s3Cache := cache.NewS3Cache(mockCache, "test-bucket")
+	h := New(
+		s3Cache,
+		imgproxy.NewClient(imgproxyServer.URL, 30*time.Second),
+		upstream.NewResolver(30*time.Second, nil, nil),
+		coalesce.New(),
+		1920,
+		0,
+	)
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/image.jpg?imwidth=640&f=webp&q=75", nil)
+	req.Header.Set("X-Img-Upstream-Gateway", upstreamServer.URL)
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if got := w.Body.String(); got != originalImage {
+		t.Fatalf("body = %q, want %q", got, originalImage)
+	}
+	if got := w.Header().Get("X-Cache"); got != "MISS" {
+		t.Fatalf("X-Cache = %q, want MISS", got)
+	}
+	if imgproxyCalls != 1 {
+		t.Fatalf("imgproxy calls = %d, want 1 (attempted transform)", imgproxyCalls)
+	}
+	if upstreamCalls != 2 {
+		t.Fatalf("upstream calls = %d, want 2 (HEAD + fallback fetch)", upstreamCalls)
+	}
+
+	mockCache.mu.Lock()
+	cacheSize := len(mockCache.objects)
+	mockCache.mu.Unlock()
+	if cacheSize > 0 {
+		t.Fatalf("cache should not store fallback response, but found %d objects", cacheSize)
+	}
+}

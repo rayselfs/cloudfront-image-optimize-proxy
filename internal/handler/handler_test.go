@@ -164,6 +164,14 @@ func TestParseParams(t *testing.T) {
 			query: url.Values{"imwidth": {"640"}, "f": {"jpeg"}, "q": {"101"}},
 			want:  &ImageParams{Width: 640, Format: "jpeg", Quality: 100},
 		},
+		"invalid quality non-numeric": {
+			query: url.Values{"imwidth": {"640"}, "f": {"webp"}, "q": {"abc"}},
+			want:  &ImageParams{Width: 640, Format: "webp", Quality: 75},
+		},
+		"invalid quality negative": {
+			query: url.Values{"imwidth": {"640"}, "f": {"webp"}, "q": {"-1"}},
+			want:  &ImageParams{Width: 640, Format: "webp", Quality: 1},
+		},
 	}
 
 	for name, tt := range tests {
