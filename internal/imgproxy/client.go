@@ -35,6 +35,19 @@ func NewClient(baseURL string, timeout time.Duration) *Client {
 	}
 }
 
+// NewClientWithTransport creates a new imgproxy Client using the provided
+// transport. If transport is nil, the default http.Transport is used.
+// The per-request timeout is enforced by the http.Client.Timeout field.
+func NewClientWithTransport(baseURL string, timeout time.Duration, transport http.RoundTripper) *Client {
+	return &Client{
+		baseURL: baseURL,
+		httpClient: &http.Client{
+			Timeout:   timeout,
+			Transport: transport,
+		},
+	}
+}
+
 // buildProcessingURL constructs the imgproxy processing URL.
 func buildProcessingURL(baseURL, sourceURL string, params TransformParams) string {
 	format := params.Format

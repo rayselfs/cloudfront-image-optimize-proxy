@@ -65,6 +65,19 @@ func NewResolver(timeout time.Duration, allowedGateways []string, allowedSourceB
 	}
 }
 
+// NewResolverWithTransport creates a DefaultResolver using the provided
+// transport. If transport is nil, the default http.Transport is used.
+func NewResolverWithTransport(timeout time.Duration, allowedGateways []string, allowedSourceBuckets []string, transport http.RoundTripper) *DefaultResolver {
+	return &DefaultResolver{
+		httpClient: &http.Client{
+			Timeout:   timeout,
+			Transport: transport,
+		},
+		allowedGateways:      allowedGateways,
+		allowedSourceBuckets: allowedSourceBuckets,
+	}
+}
+
 // Resolve returns the source URL that imgproxy should read and a fallback fetch function.
 func (d *DefaultResolver) Resolve(r *http.Request) (string, func() (io.ReadCloser, string, error), error) {
 	if r.Header.Get("X-Img-Source-Type") == "s3" {

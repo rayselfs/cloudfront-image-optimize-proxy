@@ -13,6 +13,7 @@ import (
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/coalesce"
 	appconfig "github.com/rayselfs/cloudfront-image-optimize-proxy/internal/config"
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/handler"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/httpclient"
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/imgproxy"
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/metrics"
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/middleware"
@@ -62,8 +63,9 @@ func main() {
 
 	s3Cache := cache.NewS3Cache(s3.NewFromConfig(awsCfg), cfg.CacheS3Bucket)
 	asyncCache := cache.WrapAsyncPut(s3Cache, cfg.AsyncCachePutTimeout, cfg.AsyncCachePutConcurrency)
-	imgproxyClient := imgproxy.NewClient(cfg.ImgproxyURL, cfg.ImgproxyTimeout)
-	resolver := upstream.NewResolver(cfg.UpstreamTimeout, cfg.AllowedUpstreamGateways, cfg.AllowedSourceBuckets)
+	sharedTransport := httpclient.NewTransport()
+	imgproxyClient := imgproxy.NewClientWithTransport(cfg.ImgproxyURL, cfg.ImgproxyTimeout, sharedTransport)
+	resolver := upstream.NewResolverWithTransport(cfg.UpstreamTimeout, cfg.AllowedUpstreamGateways, cfg.AllowedSourceBuckets, sharedTransport)
 	coalescer := coalesce.New()
 	imageHandler := handler.New(asyncCache, imgproxyClient, resolver, coalescer, cfg.MaxWidth, cfg.MaxBodyBytes)
 
