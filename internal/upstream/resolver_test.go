@@ -575,6 +575,52 @@ func TestResolveRequestURIEmptyPath(t *testing.T) {
 	}
 }
 
+func TestResolveGatewayFTPSchemeRejected(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "http://assets.example/img/cat.jpg", nil)
+	req.Header.Set("X-Img-Upstream-Gateway", "ftp://example.com")
+
+	_, _, _, err := NewResolver(30*time.Second, []string{"example.com"}, nil).Resolve(req)
+	if err == nil {
+		t.Fatal("Resolve() error = nil, want error for ftp scheme")
+	}
+	if !strings.Contains(err.Error(), "not allowed") {
+		t.Fatalf("error = %q, want message containing \"not allowed\"", err.Error())
+	}
+}
+
+func TestResolveGatewayFileSchemeRejected(t *testing.T) {
+	req := httptest.NewRequest(http.MethodGet, "http://assets.example/img/cat.jpg", nil)
+	req.Header.Set("X-Img-Upstream-Gateway", "file:///etc/passwd")
+
+	_, _, _, err := NewResolver(30*time.Second, nil, nil).Resolve(req)
+	if err == nil {
+		t.Fatal("Resolve() error = nil, want error for file scheme")
+	}
+	if !strings.Contains(err.Error(), "not allowed") && !strings.Contains(err.Error(), "invalid value") {
+		t.Fatalf("error = %q, want rejection error", err.Error())
+	}
+}
+
+func TestResolveGatewayHTTPSAllowed(t *testing.T) {
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("https image"))
+	}))
+	defer server.Close()
+
+	serverHost := strings.TrimPrefix(server.URL, "https://")
+
+	req := httptest.NewRequest(http.MethodGet, "http://assets.example/img/cat.jpg", nil)
+	req.Header.Set("X-Img-Upstream-Gateway", server.URL)
+
+	// Allowlist must include the host (with port) for https
+	_, _, _, err := NewResolver(30*time.Second, []string{serverHost}, nil).Resolve(req)
+	if err != nil {
+		t.Fatalf("Resolve() error = %v, want nil for https gateway", err)
+	}
+}
+
 // mockPresignerWithError is a mock presigner that returns an error
 type mockPresignerWithError struct {
 	t      *testing.T

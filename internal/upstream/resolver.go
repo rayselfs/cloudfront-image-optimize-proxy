@@ -123,6 +123,10 @@ func (d *DefaultResolver) Resolve(r *http.Request) (string, func() (string, erro
 		return "", nil, nil, fmt.Errorf("X-Img-Upstream-Gateway has invalid value")
 	}
 
+	if gatewayURL.Scheme != "http" && gatewayURL.Scheme != "https" {
+		return "", nil, nil, fmt.Errorf("upstream gateway scheme %q not allowed: only http/https permitted", gatewayURL.Scheme)
+	}
+
 	if len(d.allowedGateways) > 0 {
 		allowed := false
 		for _, g := range d.allowedGateways {
