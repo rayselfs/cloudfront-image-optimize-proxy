@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"sync"
 	"time"
 
@@ -71,15 +72,42 @@ func (a *AsyncPutCache) Put(_ context.Context, key string, body io.Reader, conte
 	return nil
 }
 
-// PutFile delegates to the inner FileCache synchronously.
-// It does NOT use the async worker pool — callers block until the upload completes.
-// This ensures the object is readable via Cache.Get immediately after PutFile returns.
+// PutFile delegates to the inner FileCache asynchronously.
+// It uses the async worker pool; excess puts are dropped, logged, and the temp file is cleaned up.
 func (a *AsyncPutCache) PutFile(ctx context.Context, key, filePath, contentType string) error {
-	fc, ok := a.inner.(FileCache)
-	if !ok {
-		return fmt.Errorf("async cache: inner cache does not support PutFile")
+	select {
+	case a.sem <- struct{}{}:
+	default:
+		metrics.IncAsyncCachePutDropped()
+		slog.Warn("async cache put file dropped: worker pool full", "key_hash", keyHash(key))
+		metrics.IncPutError()
+		_ = os.Remove(filePath)
+		return nil
 	}
-	return fc.PutFile(ctx, key, filePath, contentType)
+
+	metrics.IncAsyncCachePutInflight()
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		defer func() { <-a.sem }()
+		defer metrics.DecAsyncCachePutInflight()
+		defer os.Remove(filePath)
+
+		putCtx, cancel := context.WithTimeout(context.Background(), a.timeout)
+		defer cancel()
+
+		fc, ok := a.inner.(FileCache)
+		if !ok {
+			slog.Error("async cache: inner cache does not support PutFile")
+			metrics.IncPutError()
+			return
+		}
+		if err := fc.PutFile(putCtx, key, filePath, contentType); err != nil {
+			slog.Error("async cache put file failed", "key_hash", keyHash(key), "error", err)
+			metrics.IncPutError()
+		}
+	}()
+	return nil
 }
 
 // Wait blocks until all in-flight Put goroutines complete.
