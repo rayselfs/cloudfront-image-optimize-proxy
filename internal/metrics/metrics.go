@@ -129,15 +129,15 @@ func Registry() *prometheus.Registry {
 	return reg
 }
 
-func IncRequest()                { mu.Lock(); requestsTotal.Inc(); mu.Unlock() }
-func IncCacheHit()               { mu.Lock(); cacheHits.Inc(); mu.Unlock() }
-func IncCacheMiss()              { mu.Lock(); cacheMisses.Inc(); mu.Unlock() }
-func IncCacheBypass()            { mu.Lock(); cacheBypasses.Inc(); mu.Unlock() }
-func IncImgproxyError()          { mu.Lock(); imgproxyErrors.Inc(); mu.Unlock() }
-func IncPutError()               { mu.Lock(); putErrors.Inc(); mu.Unlock() }
-func IncAsyncCachePutInflight()  { mu.Lock(); asyncCachePutInflight.Inc(); mu.Unlock() }
-func DecAsyncCachePutInflight()  { mu.Lock(); asyncCachePutInflight.Dec(); mu.Unlock() }
-func IncAsyncCachePutDropped()   { mu.Lock(); asyncCachePutDropped.Inc(); mu.Unlock() }
+func IncRequest()                { requestsTotal.Inc() }
+func IncCacheHit()               { cacheHits.Inc() }
+func IncCacheMiss()              { cacheMisses.Inc() }
+func IncCacheBypass()            { cacheBypasses.Inc() }
+func IncImgproxyError()          { imgproxyErrors.Inc() }
+func IncPutError()               { putErrors.Inc() }
+func IncAsyncCachePutInflight()  { asyncCachePutInflight.Inc() }
+func DecAsyncCachePutInflight()  { asyncCachePutInflight.Dec() }
+func IncAsyncCachePutDropped()   { asyncCachePutDropped.Inc() }
 
 // Handler returns an HTTP handler that serves Prometheus metrics.
 func Handler() http.Handler {
@@ -151,35 +151,25 @@ func Handler() http.Handler {
 
 // ObserveHTTPRequest records an HTTP request duration sample.
 func ObserveHTTPRequest(method, statusClass, cacheStatus string, seconds float64) {
-	mu.Lock()
 	httpRequestDuration.WithLabelValues(method, statusClass, cacheStatus).Observe(seconds)
-	mu.Unlock()
 }
 
 // ObserveImgproxy records an imgproxy transform duration sample.
 func ObserveImgproxy(statusClass string, seconds float64) {
-	mu.Lock()
 	imgproxyDuration.WithLabelValues(statusClass).Observe(seconds)
-	mu.Unlock()
 }
 
 // ObserveS3Get records an S3 cache GET duration sample.
 func ObserveS3Get(outcome string, seconds float64) {
-	mu.Lock()
 	s3GetDuration.WithLabelValues(outcome).Observe(seconds)
-	mu.Unlock()
 }
 
 // ObserveS3Put records an S3 cache PUT duration sample.
 func ObserveS3Put(outcome string, seconds float64) {
-	mu.Lock()
 	s3PutDuration.WithLabelValues(outcome).Observe(seconds)
-	mu.Unlock()
 }
 
 // ObserveUpstreamFetch records an upstream fetch duration sample.
 func ObserveUpstreamFetch(outcome string, seconds float64) {
-	mu.Lock()
 	upstreamFetchDuration.WithLabelValues(outcome).Observe(seconds)
-	mu.Unlock()
 }
