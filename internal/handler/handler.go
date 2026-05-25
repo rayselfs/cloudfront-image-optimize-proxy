@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"crypto/sha256"
 	"errors"
 	"fmt"
@@ -273,14 +274,20 @@ func (h *Handler) process(r *http.Request, key string, params *ImageParams) (pro
 		return processResult{}, fmt.Errorf("handler: transformed body exceeds %d bytes", h.MaxBodyBytes)
 	}
 
-	if err := h.Cache.PutFile(r.Context(), key, tmpPath, transformedContentType); err != nil {
+	bodyBytes, err := os.ReadFile(tmpPath)
+	if err != nil {
+		_ = os.Remove(tmpPath)
+		return processResult{}, fmt.Errorf("handler: read temp file: %w", err)
+	}
+
+	if err := h.Cache.PutFile(context.Background(), key, tmpPath, transformedContentType); err != nil {
 		slog.Error("handler: cache put file", "key_hash", cacheKeyHash(key), "error", err)
 		_ = os.Remove(tmpPath)
 		return processResult{}, err
 	}
 
 	metrics.IncCacheMiss()
-	return processResult{contentType: transformedContentType, cacheStatus: "MISS", streamFromCache: true}, nil
+	return processResult{body: bodyBytes, contentType: transformedContentType, cacheStatus: "MISS", streamFromCache: false}, nil
 }
 
 func (h *Handler) readBody(r io.Reader) ([]byte, error) {
