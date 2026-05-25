@@ -36,6 +36,37 @@ func newHTTPServer(addr string, handler http.Handler) *http.Server {
 	}
 }
 
+type s3Checker interface {
+	Check(ctx context.Context) error
+}
+
+func newReadyHandler(imgproxyURL string, readyClient *http.Client, s3ReadinessEnabled bool, checker s3Checker) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, imgproxyURL+"/health", nil)
+		if err != nil {
+			http.Error(w, "imgproxy not ready", http.StatusServiceUnavailable)
+			return
+		}
+		resp, err := readyClient.Do(req)
+		if err != nil || resp.StatusCode != http.StatusOK {
+			if resp != nil {
+				resp.Body.Close()
+			}
+			http.Error(w, "imgproxy not ready", http.StatusServiceUnavailable)
+			return
+		}
+		resp.Body.Close()
+		if s3ReadinessEnabled {
+			if err := checker.Check(r.Context()); err != nil {
+				http.Error(w, "s3 not ready", http.StatusServiceUnavailable)
+				return
+			}
+		}
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	}
+}
+
 func main() {
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, nil))
 	slog.SetDefault(logger)
@@ -85,24 +116,7 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	mux.HandleFunc("GET /ready", func(w http.ResponseWriter, r *http.Request) {
-		req, err := http.NewRequestWithContext(r.Context(), http.MethodGet, cfg.ImgproxyURL+"/health", nil)
-		if err != nil {
-			http.Error(w, "imgproxy not ready", http.StatusServiceUnavailable)
-			return
-		}
-		resp, err := readyClient.Do(req)
-		if err != nil || resp.StatusCode != http.StatusOK {
-			if resp != nil {
-				resp.Body.Close()
-			}
-			http.Error(w, "imgproxy not ready", http.StatusServiceUnavailable)
-			return
-		}
-		resp.Body.Close()
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte("ok"))
-	})
+	mux.HandleFunc("GET /ready", newReadyHandler(cfg.ImgproxyURL, readyClient, cfg.S3ReadinessCheckEnabled, s3Cache))
 	mux.Handle("GET /metrics", metrics.Handler())
 	mux.Handle("/", imageHandler)
 

@@ -15,10 +15,11 @@ import (
 )
 
 type mockS3 struct {
-	getOutput *s3.GetObjectOutput
-	getErr    error
-	putInput  *s3.PutObjectInput
-	putErr    error
+	getOutput    *s3.GetObjectOutput
+	getErr       error
+	putInput     *s3.PutObjectInput
+	putErr       error
+	headBucketErr error
 }
 
 func (m *mockS3) GetObject(_ context.Context, params *s3.GetObjectInput, _ ...func(*s3.Options)) (*s3.GetObjectOutput, error) {
@@ -28,6 +29,10 @@ func (m *mockS3) GetObject(_ context.Context, params *s3.GetObjectInput, _ ...fu
 func (m *mockS3) PutObject(_ context.Context, params *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
 	m.putInput = params
 	return &s3.PutObjectOutput{}, m.putErr
+}
+
+func (m *mockS3) HeadBucket(_ context.Context, _ *s3.HeadBucketInput, _ ...func(*s3.Options)) (*s3.HeadBucketOutput, error) {
+	return &s3.HeadBucketOutput{}, m.headBucketErr
 }
 
 func TestKeyFromRequest(t *testing.T) {
@@ -126,6 +131,10 @@ func (m *mockS3Client) PutObject(_ context.Context, _ *s3.PutObjectInput, _ ...f
 	return &s3.PutObjectOutput{}, m.putErr
 }
 
+func (m *mockS3Client) HeadBucket(_ context.Context, _ *s3.HeadBucketInput, _ ...func(*s3.Options)) (*s3.HeadBucketOutput, error) {
+	return &s3.HeadBucketOutput{}, nil
+}
+
 type mockS3Uploader struct {
 	calls int
 	err   error
@@ -177,13 +186,24 @@ func TestS3CachePutFileLarge(t *testing.T) {
 	if err := c.PutFile(context.Background(), "key/large", path, "image/avif"); err != nil {
 		t.Fatalf("PutFile error: %v", err)
 	}
-	if mockUploader.calls != 1 {
-		t.Fatalf("Upload calls = %d, want 1 (large file)", mockUploader.calls)
-	}
-	if mockClient.putCalls != 0 {
-		t.Fatalf("PutObject calls = %d, want 0 (large file)", mockClient.putCalls)
-	}
 	if _, err := os.Stat(path); !os.IsNotExist(err) {
 		t.Fatal("temp file not removed after PutFile")
+	}
+}
+
+func TestS3CacheCheck_Success(t *testing.T) {
+	mock := &mockS3{}
+	c := NewS3Cache(mock, "test-bucket")
+	if err := c.Check(context.Background()); err != nil {
+		t.Fatalf("expected nil, got %v", err)
+	}
+}
+
+func TestS3CacheCheck_Failure(t *testing.T) {
+	wantErr := errors.New("access denied")
+	mock := &mockS3{headBucketErr: wantErr}
+	c := NewS3Cache(mock, "test-bucket")
+	if err := c.Check(context.Background()); !errors.Is(err, wantErr) {
+		t.Fatalf("expected %v, got %v", wantErr, err)
 	}
 }

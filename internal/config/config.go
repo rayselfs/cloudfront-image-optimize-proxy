@@ -41,6 +41,7 @@ type Config struct {
 	AllowAllUpstreamGateways    bool
 	AllowAllSourceBuckets       bool
 	MultipartThresholdBytes     int64
+	S3ReadinessCheckEnabled     bool
 }
 
 // Load reads service configuration from environment variables.
@@ -103,6 +104,7 @@ func Load() (*Config, error) {
 		AllowAllUpstreamGateways:    loadBool("ALLOW_ALL_UPSTREAM_GATEWAYS"),
 		AllowAllSourceBuckets:       loadBool("ALLOW_ALL_SOURCE_BUCKETS"),
 		MultipartThresholdBytes:     multipartThreshold,
+		S3ReadinessCheckEnabled:     loadBool("S3_READINESS_CHECK_ENABLED"),
 	}
 
 	if cfg.CacheS3Bucket == "" {

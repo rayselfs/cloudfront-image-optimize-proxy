@@ -49,6 +49,12 @@ func KeyFromRequest(host, path string, params ImageParams) string {
 type S3API interface {
 	GetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.Options)) (*s3.GetObjectOutput, error)
 	PutObject(ctx context.Context, params *s3.PutObjectInput, optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error)
+	HeadBucket(ctx context.Context, params *s3.HeadBucketInput, optFns ...func(*s3.Options)) (*s3.HeadBucketOutput, error)
+}
+
+// Checker can verify bucket accessibility.
+type Checker interface {
+	Check(ctx context.Context) error
 }
 
 // s3Uploader is the interface used for multipart uploads (enables mocking).
@@ -156,4 +162,10 @@ func (c *S3Cache) PutFile(ctx context.Context, key, filePath, contentType string
 
 	_ = os.Remove(filePath)
 	return nil
+}
+
+// Check verifies that the S3 bucket is accessible via HeadBucket.
+func (c *S3Cache) Check(ctx context.Context) error {
+	_, err := c.client.HeadBucket(ctx, &s3.HeadBucketInput{Bucket: aws.String(c.bucket)})
+	return err
 }

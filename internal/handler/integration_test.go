@@ -66,6 +66,10 @@ func (m *integrationMockS3) PutObject(_ context.Context, params *s3.PutObjectInp
 	return &s3.PutObjectOutput{}, nil
 }
 
+func (m *integrationMockS3) HeadBucket(_ context.Context, _ *s3.HeadBucketInput, _ ...func(*s3.Options)) (*s3.HeadBucketOutput, error) {
+	return &s3.HeadBucketOutput{}, nil
+}
+
 func TestIntegrationImageOptimizationFlow(t *testing.T) {
 	const (
 		originalImage    = "fake-png-image"
