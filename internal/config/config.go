@@ -43,7 +43,6 @@ type Config struct {
 	AllowAllUpstreamGateways    bool
 	AllowAllSourceBuckets       bool
 	MultipartThresholdBytes     int64
-	S3ReadinessCheckEnabled     bool
 	DefaultQuality              int
 }
 
@@ -112,7 +111,6 @@ func Load() (*Config, error) {
 		AllowAllUpstreamGateways:    loadBool("ALLOW_ALL_UPSTREAM_GATEWAYS"),
 		AllowAllSourceBuckets:       loadBool("ALLOW_ALL_SOURCE_BUCKETS"),
 		MultipartThresholdBytes:     multipartThreshold,
-		S3ReadinessCheckEnabled:     loadBool("S3_READINESS_CHECK_ENABLED"),
 		DefaultQuality:              defaultQualityVal,
 	}
 
