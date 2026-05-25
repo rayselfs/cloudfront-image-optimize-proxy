@@ -110,6 +110,8 @@ config:
   imgproxyUrl: "http://localhost:8081"
   allowedUpstreamGateways: ""
   allowedSourceBuckets: ""  # comma-separated; empty = allow all
+  allowAllUpstreamGateways: "false"
+  allowAllSourceBuckets: "false"
 
 originVerify:
   secretName: ""

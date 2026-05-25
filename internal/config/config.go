@@ -21,18 +21,20 @@ const (
 
 // Config holds the service configuration loaded from environment variables.
 type Config struct {
-	ListenAddr              string
-	ImgproxyURL             string
-	CacheS3Bucket           string
-	CacheS3Region           string
-	MaxWidth                int
-	MaxBodyBytes            int64
-	UpstreamTimeout         time.Duration
-	ImgproxyTimeout         time.Duration
-	ShutdownTimeout         time.Duration
-	OriginSecrets           []string
-	AllowedUpstreamGateways []string
-	AllowedSourceBuckets    []string
+	ListenAddr                  string
+	ImgproxyURL                 string
+	CacheS3Bucket               string
+	CacheS3Region               string
+	MaxWidth                    int
+	MaxBodyBytes                int64
+	UpstreamTimeout             time.Duration
+	ImgproxyTimeout             time.Duration
+	ShutdownTimeout             time.Duration
+	OriginSecrets               []string
+	AllowedUpstreamGateways     []string
+	AllowedSourceBuckets        []string
+	AllowAllUpstreamGateways    bool
+	AllowAllSourceBuckets       bool
 }
 
 // Load reads service configuration from environment variables.
@@ -63,22 +65,28 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		ListenAddr:              envOrDefault("LISTEN_ADDR", defaultListenAddr),
-		ImgproxyURL:             envOrDefault("IMGPROXY_URL", defaultImgproxyURL),
-		CacheS3Bucket:           strings.TrimSpace(os.Getenv("CACHE_S3_BUCKET")),
-		CacheS3Region:           envOrDefault("CACHE_S3_REGION", defaultCacheS3Region),
-		MaxWidth:                maxWidth,
-		MaxBodyBytes:            maxBodyBytes,
-		UpstreamTimeout:         upstreamTimeout,
-		ImgproxyTimeout:         imgproxyTimeout,
-		ShutdownTimeout:         shutdownTimeout,
-		OriginSecrets:           loadCSV("CF_ORIGIN_SECRET"),
-		AllowedUpstreamGateways: loadCSV("ALLOWED_UPSTREAM_GATEWAYS"),
-		AllowedSourceBuckets:    loadCSV("ALLOWED_SOURCE_BUCKETS"),
+		ListenAddr:                  envOrDefault("LISTEN_ADDR", defaultListenAddr),
+		ImgproxyURL:                 envOrDefault("IMGPROXY_URL", defaultImgproxyURL),
+		CacheS3Bucket:               strings.TrimSpace(os.Getenv("CACHE_S3_BUCKET")),
+		CacheS3Region:               envOrDefault("CACHE_S3_REGION", defaultCacheS3Region),
+		MaxWidth:                    maxWidth,
+		MaxBodyBytes:                maxBodyBytes,
+		UpstreamTimeout:             upstreamTimeout,
+		ImgproxyTimeout:             imgproxyTimeout,
+		ShutdownTimeout:             shutdownTimeout,
+		OriginSecrets:               loadCSV("CF_ORIGIN_SECRET"),
+		AllowedUpstreamGateways:     loadCSV("ALLOWED_UPSTREAM_GATEWAYS"),
+		AllowedSourceBuckets:        loadCSV("ALLOWED_SOURCE_BUCKETS"),
+		AllowAllUpstreamGateways:    loadBool("ALLOW_ALL_UPSTREAM_GATEWAYS"),
+		AllowAllSourceBuckets:       loadBool("ALLOW_ALL_SOURCE_BUCKETS"),
 	}
 
 	if cfg.CacheS3Bucket == "" {
 		return nil, fmt.Errorf("CACHE_S3_BUCKET is required")
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return nil, err
 	}
 
 	return cfg, nil
@@ -156,4 +164,19 @@ func loadCSV(name string) []string {
 		}
 	}
 	return out
+}
+
+func loadBool(name string) bool {
+	return strings.ToLower(strings.TrimSpace(os.Getenv(name))) == "true"
+}
+
+// Validate checks that allowlists are configured or explicitly opted out.
+func (c *Config) Validate() error {
+	if len(c.AllowedUpstreamGateways) == 0 && !c.AllowAllUpstreamGateways {
+		return fmt.Errorf("ALLOWED_UPSTREAM_GATEWAYS is empty; set it or set ALLOW_ALL_UPSTREAM_GATEWAYS=true to permit all")
+	}
+	if len(c.AllowedSourceBuckets) == 0 && !c.AllowAllSourceBuckets {
+		return fmt.Errorf("ALLOWED_SOURCE_BUCKETS is empty; set it or set ALLOW_ALL_SOURCE_BUCKETS=true to permit all")
+	}
+	return nil
 }

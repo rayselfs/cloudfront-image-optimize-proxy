@@ -22,3 +22,5 @@ data:
   {{- if .Values.config.allowedSourceBuckets }}
   ALLOWED_SOURCE_BUCKETS: {{ .Values.config.allowedSourceBuckets | quote }}
   {{- end }}
+  ALLOW_ALL_UPSTREAM_GATEWAYS: {{ .Values.config.allowAllUpstreamGateways | quote }}
+  ALLOW_ALL_SOURCE_BUCKETS: {{ .Values.config.allowAllSourceBuckets | quote }}
