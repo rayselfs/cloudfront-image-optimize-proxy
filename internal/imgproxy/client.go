@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"time"
 )
 
@@ -40,7 +41,7 @@ func buildProcessingURL(baseURL, sourceURL string, params TransformParams) strin
 	if format == "jpeg" {
 		format = "jpg"
 	}
-	return fmt.Sprintf("%s/unsafe/rs:fit:%d/q:%d/%s/plain/%s", baseURL, params.Width, params.Quality, format, sourceURL)
+	return fmt.Sprintf("%s/unsafe/rs:fit:%d/q:%d/%s/plain/%s", baseURL, params.Width, params.Quality, format, url.PathEscape(sourceURL))
 }
 
 // Transform fetches the transformed image from imgproxy.
