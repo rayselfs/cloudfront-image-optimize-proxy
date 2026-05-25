@@ -4,31 +4,53 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"sync"
 	"time"
 
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/metrics"
 )
 
-type asyncPutCache struct {
+const maxConcurrentPuts = 32
+
+// AsyncPutCache wraps a Cache and executes Put operations in background goroutines.
+// Use Wait to drain in-flight puts during graceful shutdown.
+type AsyncPutCache struct {
 	inner   Cache
 	timeout time.Duration
+	sem     chan struct{}
+	wg      sync.WaitGroup
 }
 
 // WrapAsyncPut wraps c so that Put is executed in a background goroutine.
-// The response is never blocked waiting for S3. Put errors are logged but never returned.
-func WrapAsyncPut(c Cache, timeout time.Duration) Cache {
-	return &asyncPutCache{inner: c, timeout: timeout}
+// Concurrency is capped at maxConcurrentPuts; excess puts are dropped and logged.
+func WrapAsyncPut(c Cache, timeout time.Duration) *AsyncPutCache {
+	return &AsyncPutCache{
+		inner:   c,
+		timeout: timeout,
+		sem:     make(chan struct{}, maxConcurrentPuts),
+	}
 }
 
-func (a *asyncPutCache) Get(ctx context.Context, key string) (io.ReadCloser, string, error) {
+func (a *AsyncPutCache) Get(ctx context.Context, key string) (io.ReadCloser, string, error) {
 	return a.inner.Get(ctx, key)
 }
 
-// Put fires a goroutine to write body to the inner cache. It always returns nil immediately.
-// The body reader must remain valid until the goroutine completes; callers should pass
-// a bytes.NewReader (already-buffered) rather than a streaming body.
-func (a *asyncPutCache) Put(_ context.Context, key string, body io.Reader, contentType string) error {
+// Put fires a background goroutine to write body to the inner cache.
+// Always returns nil immediately. body must be fully buffered (e.g. bytes.NewReader).
+func (a *AsyncPutCache) Put(_ context.Context, key string, body io.Reader, contentType string) error {
+	select {
+	case a.sem <- struct{}{}:
+	default:
+		slog.Warn("async cache put dropped: worker pool full", "key", key)
+		metrics.IncPutError()
+		return nil
+	}
+
+	a.wg.Add(1)
 	go func() {
+		defer a.wg.Done()
+		defer func() { <-a.sem }()
+
 		putCtx, cancel := context.WithTimeout(context.Background(), a.timeout)
 		defer cancel()
 		if err := a.inner.Put(putCtx, key, body, contentType); err != nil {
@@ -37,4 +59,9 @@ func (a *asyncPutCache) Put(_ context.Context, key string, body io.Reader, conte
 		}
 	}()
 	return nil
+}
+
+// Wait blocks until all in-flight Put goroutines complete.
+func (a *AsyncPutCache) Wait() {
+	a.wg.Wait()
 }

@@ -31,6 +31,17 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Startup security warnings.
+	if len(cfg.OriginSecrets) == 0 {
+		slog.Warn("CF_ORIGIN_SECRET is not set; origin verification is disabled")
+	}
+	if len(cfg.AllowedUpstreamGateways) == 0 {
+		slog.Warn("ALLOWED_UPSTREAM_GATEWAYS is not set; any upstream gateway is permitted")
+	}
+	if len(cfg.AllowedSourceBuckets) == 0 {
+		slog.Warn("ALLOWED_SOURCE_BUCKETS is not set; any S3 source bucket is permitted")
+	}
+
 	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background(), awsconfig.WithRegion(cfg.CacheS3Region))
 	if err != nil {
 		slog.Error("load aws config", "error", err)
@@ -40,9 +51,9 @@ func main() {
 	s3Cache := cache.NewS3Cache(s3.NewFromConfig(awsCfg), cfg.CacheS3Bucket)
 	asyncCache := cache.WrapAsyncPut(s3Cache, 30*time.Second)
 	imgproxyClient := imgproxy.NewClient(cfg.ImgproxyURL, cfg.ImgproxyTimeout)
-	resolver := upstream.NewResolver(cfg.UpstreamTimeout, cfg.AllowedUpstreamGateways)
+	resolver := upstream.NewResolver(cfg.UpstreamTimeout, cfg.AllowedUpstreamGateways, cfg.AllowedSourceBuckets)
 	coalescer := coalesce.New()
-	imageHandler := handler.New(asyncCache, imgproxyClient, resolver, coalescer, cfg.MaxWidth)
+	imageHandler := handler.New(asyncCache, imgproxyClient, resolver, coalescer, cfg.MaxWidth, cfg.MaxBodyBytes)
 
 	readyClient := &http.Client{Timeout: 2 * time.Second}
 
@@ -94,10 +105,13 @@ func main() {
 	<-ctx.Done()
 	slog.Info("shutting down")
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), cfg.ShutdownTimeout)
 	defer cancel()
 
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		slog.Error("shutdown error", "error", err)
 	}
+
+	asyncCache.Wait()
+	slog.Info("async cache drained")
 }

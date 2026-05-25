@@ -103,9 +103,13 @@ config:
   cacheS3Bucket: ""
   cacheS3Region: "us-east-1"
   maxWidth: "1920"
+  maxBodyBytes: ""        # bytes; empty = use code default (20 MB)
   upstreamTimeout: "30"
   imgproxyTimeout: "30"
+  shutdownTimeout: "25"  # seconds; must be < terminationGracePeriodSeconds
+  imgproxyUrl: "http://localhost:8081"
   allowedUpstreamGateways: ""
+  allowedSourceBuckets: ""  # comma-separated; empty = allow all
 
 originVerify:
   secretName: ""

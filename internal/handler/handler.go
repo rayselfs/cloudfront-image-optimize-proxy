@@ -18,11 +18,12 @@ import (
 
 // Handler is the main image optimization HTTP handler.
 type Handler struct {
-	Cache       cache.Cache
-	Transformer imgproxy.Transformer
-	Resolver    upstream.Resolver
-	Coalescer   coalesce.Coalescer
-	MaxWidth    int
+	Cache        cache.Cache
+	Transformer  imgproxy.Transformer
+	Resolver     upstream.Resolver
+	Coalescer    coalesce.Coalescer
+	MaxWidth     int
+	MaxBodyBytes int64
 }
 
 type processResult struct {
@@ -31,14 +32,15 @@ type processResult struct {
 	cacheStatus string
 }
 
-// New creates a new Handler.
-func New(c cache.Cache, t imgproxy.Transformer, r upstream.Resolver, coal coalesce.Coalescer, maxWidth int) *Handler {
+// New creates a new Handler. maxBodyBytes limits upstream/transform body reads (0 = no limit).
+func New(c cache.Cache, t imgproxy.Transformer, r upstream.Resolver, coal coalesce.Coalescer, maxWidth int, maxBodyBytes int64) *Handler {
 	return &Handler{
-		Cache:       c,
-		Transformer: t,
-		Resolver:    r,
-		Coalescer:   coal,
-		MaxWidth:    maxWidth,
+		Cache:        c,
+		Transformer:  t,
+		Resolver:     r,
+		Coalescer:    coal,
+		MaxWidth:     maxWidth,
+		MaxBodyBytes: maxBodyBytes,
 	}
 }
 
@@ -60,7 +62,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Quality: params.Quality,
 	})
 
-	value, err, _ := h.Coalescer.Do(key, func() (interface{}, error) {
+	value, err, _ := h.Coalescer.Do(r.Context(), key, func() (interface{}, error) {
 		return h.process(r, key, params)
 	})
 	if err != nil {
@@ -105,7 +107,7 @@ func (h *Handler) passThrough(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) process(r *http.Request, key string, params *ImageParams) (processResult, error) {
 	if body, contentType, err := h.Cache.Get(r.Context(), key); err == nil {
 		defer body.Close()
-		data, err := io.ReadAll(body)
+		data, err := h.readBody(body)
 		if err != nil {
 			return processResult{}, err
 		}
@@ -126,8 +128,7 @@ func (h *Handler) process(r *http.Request, key string, params *ImageParams) (pro
 	}
 	defer originalBody.Close()
 
-	// Buffer original body once to avoid a second upstream fetch on imgproxy failure.
-	originalData, err := io.ReadAll(originalBody)
+	originalData, err := h.readBody(originalBody)
 	if err != nil {
 		return processResult{}, err
 	}
@@ -146,7 +147,6 @@ func (h *Handler) process(r *http.Request, key string, params *ImageParams) (pro
 		slog.Error("handler: transform failed, using original",
 			"error", err,
 			"path", r.URL.Path,
-			"cache_key", key,
 		)
 		metrics.IncImgproxyError()
 		metrics.IncCacheMiss()
@@ -154,7 +154,7 @@ func (h *Handler) process(r *http.Request, key string, params *ImageParams) (pro
 	}
 	defer transformedBody.Close()
 
-	data, err := io.ReadAll(transformedBody)
+	data, err := h.readBody(transformedBody)
 	if err != nil {
 		return processResult{}, err
 	}
@@ -164,6 +164,21 @@ func (h *Handler) process(r *http.Request, key string, params *ImageParams) (pro
 
 	metrics.IncCacheMiss()
 	return processResult{body: data, contentType: transformedContentType, cacheStatus: "MISS"}, nil
+}
+
+func (h *Handler) readBody(r io.Reader) ([]byte, error) {
+	if h.MaxBodyBytes <= 0 {
+		return io.ReadAll(r)
+	}
+	limit := h.MaxBodyBytes + 1
+	data, err := io.ReadAll(io.LimitReader(r, limit))
+	if err != nil {
+		return nil, err
+	}
+	if int64(len(data)) > h.MaxBodyBytes {
+		return nil, fmt.Errorf("response body exceeds %d bytes", h.MaxBodyBytes)
+	}
+	return data, nil
 }
 
 func (h *Handler) writeResult(w http.ResponseWriter, result processResult) {

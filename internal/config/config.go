@@ -13,8 +13,10 @@ const (
 	defaultImgproxyURL     = "http://localhost:8081"
 	defaultCacheS3Region   = "us-west-2"
 	defaultMaxWidth        = 1920
+	defaultMaxBodyBytes    = 20 * 1024 * 1024 // 20 MB
 	defaultUpstreamTimeout = 30 * time.Second
 	defaultImgproxyTimeout = 30 * time.Second
+	defaultShutdownTimeout = 25 * time.Second
 )
 
 // Config holds the service configuration loaded from environment variables.
@@ -24,15 +26,23 @@ type Config struct {
 	CacheS3Bucket           string
 	CacheS3Region           string
 	MaxWidth                int
+	MaxBodyBytes            int64
 	UpstreamTimeout         time.Duration
 	ImgproxyTimeout         time.Duration
+	ShutdownTimeout         time.Duration
 	OriginSecrets           []string
 	AllowedUpstreamGateways []string
+	AllowedSourceBuckets    []string
 }
 
 // Load reads service configuration from environment variables.
 func Load() (*Config, error) {
 	maxWidth, err := loadPositiveInt("MAX_WIDTH", defaultMaxWidth)
+	if err != nil {
+		return nil, err
+	}
+
+	maxBodyBytes, err := loadPositiveInt64("MAX_BODY_BYTES", defaultMaxBodyBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -47,16 +57,24 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	shutdownTimeout, err := loadDurationSeconds("SHUTDOWN_TIMEOUT", defaultShutdownTimeout)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{
 		ListenAddr:              envOrDefault("LISTEN_ADDR", defaultListenAddr),
 		ImgproxyURL:             envOrDefault("IMGPROXY_URL", defaultImgproxyURL),
 		CacheS3Bucket:           strings.TrimSpace(os.Getenv("CACHE_S3_BUCKET")),
 		CacheS3Region:           envOrDefault("CACHE_S3_REGION", defaultCacheS3Region),
 		MaxWidth:                maxWidth,
+		MaxBodyBytes:            maxBodyBytes,
 		UpstreamTimeout:         upstreamTimeout,
 		ImgproxyTimeout:         imgproxyTimeout,
+		ShutdownTimeout:         shutdownTimeout,
 		OriginSecrets:           loadCSV("CF_ORIGIN_SECRET"),
 		AllowedUpstreamGateways: loadCSV("ALLOWED_UPSTREAM_GATEWAYS"),
+		AllowedSourceBuckets:    loadCSV("ALLOWED_SOURCE_BUCKETS"),
 	}
 
 	if cfg.CacheS3Bucket == "" {
@@ -81,6 +99,23 @@ func loadPositiveInt(name string, fallback int) (int, error) {
 	}
 
 	n, err := strconv.Atoi(value)
+	if err != nil {
+		return 0, fmt.Errorf("%s must be an integer: %w", name, err)
+	}
+	if n <= 0 {
+		return 0, fmt.Errorf("%s must be greater than zero", name)
+	}
+
+	return n, nil
+}
+
+func loadPositiveInt64(name string, fallback int64) (int64, error) {
+	value := strings.TrimSpace(os.Getenv(name))
+	if value == "" {
+		return fallback, nil
+	}
+
+	n, err := strconv.ParseInt(value, 10, 64)
 	if err != nil {
 		return 0, fmt.Errorf("%s must be an integer: %w", name, err)
 	}
