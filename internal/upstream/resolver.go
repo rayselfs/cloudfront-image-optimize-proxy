@@ -16,6 +16,7 @@ import (
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/metrics"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/requestid"
 )
 
 // Resolver determines the upstream source for an image.
@@ -274,6 +275,9 @@ func (d *DefaultResolver) doFetch(ctx context.Context, rawURL, host string) (io.
 	}
 	if host != "" {
 		req.Host = host
+	}
+	if id := requestid.FromContext(ctx); id != "" {
+		req.Header.Set("X-Request-Id", id)
 	}
 
 	res, err := d.httpClient.Do(req)

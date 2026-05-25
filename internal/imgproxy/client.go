@@ -7,6 +7,8 @@ import (
 	"net/http"
 	"net/url"
 	"time"
+
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/requestid"
 )
 
 // TransformParams holds parameters for image transformation.
@@ -64,6 +66,10 @@ func (c *Client) Transform(ctx context.Context, sourceURL string, params Transfo
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
 		return nil, "", fmt.Errorf("imgproxy: build request: %w", err)
+	}
+
+	if id := requestid.FromContext(ctx); id != "" {
+		req.Header.Set("X-Request-Id", id)
 	}
 
 	resp, err := c.httpClient.Do(req)

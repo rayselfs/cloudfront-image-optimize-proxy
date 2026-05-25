@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/metrics"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/requestid"
 )
 
 // Logging is a structured JSON logging middleware.
@@ -26,6 +27,7 @@ func Logging(next http.Handler) http.Handler {
 			"x_cache", wrapped.Header().Get("X-Cache"),
 			"bytes_written", wrapped.bytesWritten,
 			"remote_addr", r.RemoteAddr,
+			"request_id", requestid.FromContext(r.Context()),
 		)
 	})
 }

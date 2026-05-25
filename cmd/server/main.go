@@ -106,7 +106,7 @@ func main() {
 	mux.Handle("GET /metrics", metrics.Handler())
 	mux.Handle("/", imageHandler)
 
-	srv := newHTTPServer(cfg.ListenAddr, middleware.SecurityHeaders(middleware.Logging(middleware.CloudFrontVerify(cfg.OriginSecrets)(mux))))
+	srv := newHTTPServer(cfg.ListenAddr, middleware.CorrelationID(middleware.SecurityHeaders(middleware.Logging(middleware.CloudFrontVerify(cfg.OriginSecrets)(mux)))))
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
