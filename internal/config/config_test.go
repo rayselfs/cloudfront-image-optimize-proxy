@@ -281,3 +281,104 @@ func TestAsyncCachePutCustomValues(t *testing.T) {
 		t.Fatalf("AsyncCachePutTimeout = %v, want 60s", cfg.AsyncCachePutTimeout)
 	}
 }
+
+func TestLoadInvalidSettings(t *testing.T) {
+	tests := []struct {
+		name   string
+		envVar string
+		value  string
+	}{
+		// MAX_WIDTH invalid values
+		{"MAX_WIDTH=0", "MAX_WIDTH", "0"},
+		{"MAX_WIDTH=-1", "MAX_WIDTH", "-1"},
+		{"MAX_WIDTH=abc", "MAX_WIDTH", "abc"},
+		// MAX_BODY_BYTES invalid values
+		{"MAX_BODY_BYTES=0", "MAX_BODY_BYTES", "0"},
+		{"MAX_BODY_BYTES=-5", "MAX_BODY_BYTES", "-5"},
+		// UPSTREAM_TIMEOUT invalid values
+		{"UPSTREAM_TIMEOUT=0", "UPSTREAM_TIMEOUT", "0"},
+		{"UPSTREAM_TIMEOUT=-1", "UPSTREAM_TIMEOUT", "-1"},
+		{"UPSTREAM_TIMEOUT=abc", "UPSTREAM_TIMEOUT", "abc"},
+		// IMGPROXY_TIMEOUT invalid values
+		{"IMGPROXY_TIMEOUT=0", "IMGPROXY_TIMEOUT", "0"},
+		// SHUTDOWN_TIMEOUT invalid values
+		{"SHUTDOWN_TIMEOUT=0", "SHUTDOWN_TIMEOUT", "0"},
+		// ASYNC_CACHE_PUT_CONCURRENCY invalid values
+		{"ASYNC_CACHE_PUT_CONCURRENCY=0", "ASYNC_CACHE_PUT_CONCURRENCY", "0"},
+		{"ASYNC_CACHE_PUT_CONCURRENCY=-1", "ASYNC_CACHE_PUT_CONCURRENCY", "-1"},
+		// ASYNC_CACHE_PUT_TIMEOUT_SECONDS invalid values
+		{"ASYNC_CACHE_PUT_TIMEOUT_SECONDS=0", "ASYNC_CACHE_PUT_TIMEOUT_SECONDS", "0"},
+		// S3_MULTIPART_THRESHOLD_BYTES invalid values
+		{"S3_MULTIPART_THRESHOLD_BYTES=0", "S3_MULTIPART_THRESHOLD_BYTES", "0"},
+		{"S3_MULTIPART_THRESHOLD_BYTES=-1", "S3_MULTIPART_THRESHOLD_BYTES", "-1"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CACHE_S3_BUCKET", "test")
+			t.Setenv("ALLOW_ALL_UPSTREAM_GATEWAYS", "true")
+			t.Setenv("ALLOW_ALL_SOURCE_BUCKETS", "true")
+			t.Setenv(tc.envVar, tc.value)
+
+			_, err := Load()
+			if err == nil {
+				t.Fatalf("Load() error = nil, want error for %s=%s", tc.envVar, tc.value)
+			}
+		})
+	}
+}
+
+func TestLoadValidSettings(t *testing.T) {
+	tests := []struct {
+		name                       string
+		maxWidth                   string
+		maxBodyBytes               string
+		upstreamTimeout            string
+		asyncCachePutConcurrency   string
+		wantMaxWidth               int
+		wantMaxBodyBytes           int64
+		wantUpstreamTimeout        time.Duration
+		wantAsyncCachePutConcurrency int
+	}{
+		{
+			name:                       "custom valid values",
+			maxWidth:                   "640",
+			maxBodyBytes:               "1048576",
+			upstreamTimeout:            "10",
+			asyncCachePutConcurrency:   "16",
+			wantMaxWidth:               640,
+			wantMaxBodyBytes:           1048576,
+			wantUpstreamTimeout:        10 * time.Second,
+			wantAsyncCachePutConcurrency: 16,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CACHE_S3_BUCKET", "test")
+			t.Setenv("ALLOW_ALL_UPSTREAM_GATEWAYS", "true")
+			t.Setenv("ALLOW_ALL_SOURCE_BUCKETS", "true")
+			t.Setenv("MAX_WIDTH", tc.maxWidth)
+			t.Setenv("MAX_BODY_BYTES", tc.maxBodyBytes)
+			t.Setenv("UPSTREAM_TIMEOUT", tc.upstreamTimeout)
+			t.Setenv("ASYNC_CACHE_PUT_CONCURRENCY", tc.asyncCachePutConcurrency)
+
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if cfg.MaxWidth != tc.wantMaxWidth {
+				t.Fatalf("MaxWidth = %d, want %d", cfg.MaxWidth, tc.wantMaxWidth)
+			}
+			if cfg.MaxBodyBytes != tc.wantMaxBodyBytes {
+				t.Fatalf("MaxBodyBytes = %d, want %d", cfg.MaxBodyBytes, tc.wantMaxBodyBytes)
+			}
+			if cfg.UpstreamTimeout != tc.wantUpstreamTimeout {
+				t.Fatalf("UpstreamTimeout = %v, want %v", cfg.UpstreamTimeout, tc.wantUpstreamTimeout)
+			}
+			if cfg.AsyncCachePutConcurrency != tc.wantAsyncCachePutConcurrency {
+				t.Fatalf("AsyncCachePutConcurrency = %d, want %d", cfg.AsyncCachePutConcurrency, tc.wantAsyncCachePutConcurrency)
+			}
+		})
+	}
+}
