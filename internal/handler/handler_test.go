@@ -419,6 +419,46 @@ func TestMaxBodyBytesExceeded(t *testing.T) {
 	}
 }
 
+func TestPassThroughUnderLimit(t *testing.T) {
+	c := &mockCache{}
+	tx := &mockTransformer{}
+	r := &mockResolver{body: []byte("12345678"), contentType: "image/png"}
+	coal := &mockCoalescer{}
+	h := New(c, tx, r, coal, 1920, 10)
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/image.png", nil)
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if got := w.Body.String(); got != "12345678" {
+		t.Fatalf("body = %q, want %q", got, "12345678")
+	}
+	if got := w.Header().Get("Content-Type"); got != "image/png" {
+		t.Fatalf("Content-Type = %q, want image/png", got)
+	}
+}
+
+func TestPassThroughOverLimit(t *testing.T) {
+	c := &mockCache{}
+	tx := &mockTransformer{}
+	r := &mockResolver{body: []byte("original body"), contentType: "image/png"}
+	coal := &mockCoalescer{}
+	h := New(c, tx, r, coal, 1920, 5)
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/image.png", nil)
+	w := httptest.NewRecorder()
+
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusRequestEntityTooLarge {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusRequestEntityTooLarge)
+	}
+}
+
 func TestCacheGetNonMissError(t *testing.T) {
 	// cache.Get returning a non-ErrNotFound error should log and fall through to fetch.
 	c := &mockCache{getErr: errors.New("s3 read error")}

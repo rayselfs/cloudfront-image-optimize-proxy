@@ -96,12 +96,31 @@ func (h *Handler) passThrough(w http.ResponseWriter, r *http.Request) {
 	}
 	defer body.Close()
 
+	if h.MaxBodyBytes <= 0 {
+		if contentType != "" {
+			w.Header().Set("Content-Type", contentType)
+		}
+		if _, err := io.Copy(w, body); err != nil {
+			slog.Error("handler: write pass-through", "error", err)
+		}
+		return
+	}
+
+	limited := io.LimitReader(body, h.MaxBodyBytes+1)
+	buf, err := io.ReadAll(limited)
+	if err != nil {
+		slog.Error("handler: read pass-through body", "error", err)
+		h.writeError(w)
+		return
+	}
+	if int64(len(buf)) > h.MaxBodyBytes {
+		http.Error(w, http.StatusText(http.StatusRequestEntityTooLarge), http.StatusRequestEntityTooLarge)
+		return
+	}
 	if contentType != "" {
 		w.Header().Set("Content-Type", contentType)
 	}
-	if _, err := io.Copy(w, body); err != nil {
-		slog.Error("handler: write pass-through", "error", err)
-	}
+	_, _ = w.Write(buf)
 }
 
 func (h *Handler) process(r *http.Request, key string, params *ImageParams) (processResult, error) {
