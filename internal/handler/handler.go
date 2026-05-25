@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"strings"
+	"sync"
 
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/cache"
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/coalesce"
@@ -17,6 +18,13 @@ import (
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/metrics"
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/upstream"
 )
+
+var copyBufPool = sync.Pool{
+	New: func() interface{} {
+		b := make([]byte, 32*1024) // 32 KB buffer
+		return &b
+	},
+}
 
 // Handler is the main image optimization HTTP handler.
 type Handler struct {
