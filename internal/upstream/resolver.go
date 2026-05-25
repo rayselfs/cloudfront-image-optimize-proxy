@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -36,6 +37,11 @@ var newS3Presigner = func(ctx context.Context) (s3Presigner, error) {
 type DefaultResolver struct {
 	httpClient      *http.Client
 	allowedGateways []string
+	// presigner is initialized once via presignerOnce to avoid calling
+	// awsconfig.LoadDefaultConfig on every S3 request.
+	presignerOnce sync.Once
+	presigner     s3Presigner
+	presignerErr  error
 }
 
 // NewResolver creates the default upstream resolver with the given HTTP timeout.
@@ -92,12 +98,15 @@ func (d *DefaultResolver) resolveS3(r *http.Request) (string, func() (io.ReadClo
 		return "", nil, fmt.Errorf("X-Img-Source-Bucket is required for s3 source")
 	}
 
-	presigner, err := newS3Presigner(r.Context())
-	if err != nil {
-		return "", nil, err
+	// Initialize the presigner once per resolver instance.
+	d.presignerOnce.Do(func() {
+		d.presigner, d.presignerErr = newS3Presigner(r.Context())
+	})
+	if d.presignerErr != nil {
+		return "", nil, d.presignerErr
 	}
 
-	presigned, err := presigner.PresignGetObject(r.Context(), &s3.GetObjectInput{
+	presigned, err := d.presigner.PresignGetObject(r.Context(), &s3.GetObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(strings.TrimPrefix(r.URL.Path, "/")),
 	})

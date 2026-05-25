@@ -12,6 +12,7 @@ import (
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/cache"
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/coalesce"
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/imgproxy"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/metrics"
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/upstream"
 )
 
@@ -108,6 +109,7 @@ func (h *Handler) process(r *http.Request, key string, params *ImageParams) (pro
 		if err != nil {
 			return processResult{}, err
 		}
+		metrics.IncCacheHit()
 		return processResult{body: data, contentType: contentType, cacheStatus: "HIT"}, nil
 	} else if !errors.Is(err, cache.ErrNotFound) {
 		slog.Error("handler: cache get", "key", key, "error", err)
@@ -124,12 +126,15 @@ func (h *Handler) process(r *http.Request, key string, params *ImageParams) (pro
 	}
 	defer originalBody.Close()
 
+	// Buffer original body once to avoid a second upstream fetch on imgproxy failure.
+	originalData, err := io.ReadAll(originalBody)
+	if err != nil {
+		return processResult{}, err
+	}
+
 	if !strings.HasPrefix(originalContentType, "image/") {
-		data, err := io.ReadAll(originalBody)
-		if err != nil {
-			return processResult{}, err
-		}
-		return processResult{body: data, contentType: originalContentType, cacheStatus: "BYPASS"}, nil
+		metrics.IncCacheBypass()
+		return processResult{body: originalData, contentType: originalContentType, cacheStatus: "BYPASS"}, nil
 	}
 
 	transformedBody, transformedContentType, err := h.Transformer.Transform(r.Context(), sourceURL, imgproxy.TransformParams{
@@ -143,16 +148,9 @@ func (h *Handler) process(r *http.Request, key string, params *ImageParams) (pro
 			"path", r.URL.Path,
 			"cache_key", key,
 		)
-		fallbackBody, fallbackContentType, fetchErr := fetchFunc()
-		if fetchErr != nil {
-			return processResult{}, fetchErr
-		}
-		defer fallbackBody.Close()
-		data, readErr := io.ReadAll(fallbackBody)
-		if readErr != nil {
-			return processResult{}, readErr
-		}
-		return processResult{body: data, contentType: fallbackContentType, cacheStatus: "MISS"}, nil
+		metrics.IncImgproxyError()
+		metrics.IncCacheMiss()
+		return processResult{body: originalData, contentType: originalContentType, cacheStatus: "MISS"}, nil
 	}
 	defer transformedBody.Close()
 
@@ -164,6 +162,7 @@ func (h *Handler) process(r *http.Request, key string, params *ImageParams) (pro
 		slog.Error("handler: cache put", "key", key, "error", err)
 	}
 
+	metrics.IncCacheMiss()
 	return processResult{body: data, contentType: transformedContentType, cacheStatus: "MISS"}, nil
 }
 
