@@ -76,7 +76,7 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
-	asyncCachePutTimeout, err := loadDurationSeconds("ASYNC_CACHE_PUT_TIMEOUT_SECONDS", 30)
+	asyncCachePutTimeout, err := loadDurationSeconds("ASYNC_CACHE_PUT_TIMEOUT_SECONDS", defaultAsyncCachePutTimeout)
 	if err != nil {
 		return nil, err
 	}

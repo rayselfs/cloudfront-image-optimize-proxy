@@ -19,6 +19,12 @@ func Logging(next http.Handler) http.Handler {
 
 		metrics.IncRequest()
 
+		cacheStatus := wrapped.Header().Get("X-Cache")
+		if cacheStatus == "" {
+			cacheStatus = "UNKNOWN"
+		}
+		metrics.ObserveHTTPRequest(r.Method, httpStatusClass(wrapped.statusCode), cacheStatus, time.Since(start).Seconds())
+
 		slog.Info("request completed",
 			"method", r.Method,
 			"path", r.URL.Path,
@@ -47,4 +53,19 @@ func (w *responseWriter) Write(b []byte) (int, error) {
 	n, err := w.ResponseWriter.Write(b)
 	w.bytesWritten += n
 	return n, err
+}
+
+func httpStatusClass(code int) string {
+	switch {
+	case code >= 500:
+		return "5xx"
+	case code >= 400:
+		return "4xx"
+	case code >= 300:
+		return "3xx"
+	case code >= 200:
+		return "2xx"
+	default:
+		return "other"
+	}
 }

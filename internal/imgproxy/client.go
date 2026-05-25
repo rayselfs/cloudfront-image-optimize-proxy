@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"time"
 
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/metrics"
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/requestid"
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/tracing"
 	"go.opentelemetry.io/otel/attribute"
@@ -87,14 +88,18 @@ func (c *Client) Transform(ctx context.Context, sourceURL string, params Transfo
 		req.Header.Set("X-Request-Id", id)
 	}
 
+	start := time.Now()
 	resp, err := c.httpClient.Do(req)
+	elapsed := time.Since(start)
 	if err != nil {
+		metrics.ObserveImgproxy("error", elapsed.Seconds())
 		err = fmt.Errorf("imgproxy: request failed: %w", err)
 		span.RecordError(err)
 		return nil, "", err
 	}
 
 	if resp.StatusCode != http.StatusOK {
+		metrics.ObserveImgproxy(imgproxyStatusClass(resp.StatusCode), elapsed.Seconds())
 		snippet := make([]byte, 256)
 		n, _ := resp.Body.Read(snippet)
 		resp.Body.Close()
@@ -104,5 +109,21 @@ func (c *Client) Transform(ctx context.Context, sourceURL string, params Transfo
 		return nil, "", err
 	}
 
+	metrics.ObserveImgproxy("2xx", elapsed.Seconds())
 	return resp.Body, resp.Header.Get("Content-Type"), nil
+}
+
+func imgproxyStatusClass(code int) string {
+	switch {
+	case code >= 500:
+		return "5xx"
+	case code >= 400:
+		return "4xx"
+	case code >= 300:
+		return "3xx"
+	case code >= 200:
+		return "2xx"
+	default:
+		return "other"
+	}
 }

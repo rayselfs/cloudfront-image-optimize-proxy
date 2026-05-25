@@ -15,7 +15,7 @@ spec:
       interval: 30s
       rules:
         - alert: ImageProxyHigh5xxRate
-          expr: rate(http_requests_total{status_class="5xx"}[5m]) > 0.05
+          expr: rate(http_request_duration_seconds_count{status_class="5xx"}[5m]) / rate(http_request_duration_seconds_count[5m]) > 0.05
           for: 5m
           labels:
             severity: warning

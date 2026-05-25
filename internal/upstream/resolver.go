@@ -264,6 +264,9 @@ func (d *DefaultResolver) headHTTP(ctx context.Context, rawURL, host string) (st
 	if host != "" {
 		req.Host = host
 	}
+	if id := requestid.FromContext(ctx); id != "" {
+		req.Header.Set("X-Request-Id", id)
+	}
 	res, err := d.httpClient.Do(req)
 	if err != nil {
 		return "", nil

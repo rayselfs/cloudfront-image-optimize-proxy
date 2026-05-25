@@ -7,11 +7,13 @@ import (
 	"io"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/metrics"
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/tracing"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/codes"
@@ -94,6 +96,7 @@ func (c *S3Cache) Get(ctx context.Context, key string) (io.ReadCloser, string, e
 	ctx, span := tracing.Tracer().Start(ctx, "s3.cache.get")
 	defer span.End()
 
+	start := time.Now()
 	out, err := c.client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(c.bucket),
 		Key:    aws.String(key),
@@ -102,13 +105,16 @@ func (c *S3Cache) Get(ctx context.Context, key string) (io.ReadCloser, string, e
 		var noSuchKey *types.NoSuchKey
 		if errors.As(err, &noSuchKey) {
 			span.SetAttributes(attribute.String("s3.outcome", "miss"))
+			metrics.ObserveS3Get("miss", time.Since(start).Seconds())
 			return nil, "", ErrNotFound
 		}
 		span.SetAttributes(attribute.String("s3.outcome", "error"))
 		span.RecordError(err)
+		metrics.ObserveS3Get("error", time.Since(start).Seconds())
 		return nil, "", err
 	}
 	span.SetAttributes(attribute.String("s3.outcome", "hit"))
+	metrics.ObserveS3Get("hit", time.Since(start).Seconds())
 
 	contentType := ""
 	if out.ContentType != nil {
@@ -128,6 +134,7 @@ func (c *S3Cache) Put(ctx context.Context, key string, body io.Reader, contentTy
 		span.RecordError(err)
 		return err
 	}
+	start := time.Now()
 	_, err := c.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:       aws.String(c.bucket),
 		Key:          aws.String(key),
@@ -137,8 +144,11 @@ func (c *S3Cache) Put(ctx context.Context, key string, body io.Reader, contentTy
 	})
 	if err != nil {
 		span.RecordError(err)
+		metrics.ObserveS3Put("error", time.Since(start).Seconds())
+		return err
 	}
-	return err
+	metrics.ObserveS3Put("success", time.Since(start).Seconds())
+	return nil
 }
 
 // PutFile stores a local file in the cache. For files smaller than the
@@ -179,20 +189,24 @@ func (c *S3Cache) PutFile(ctx context.Context, key, filePath, contentType string
 		CacheControl: aws.String("public, max-age=31536000"),
 	}
 
+	start := time.Now()
 	if c.uploader != nil && c.multipartThreshold > 0 && fi.Size() >= c.multipartThreshold {
 		if _, err := c.uploader.Upload(ctx, input); err != nil {
 			err = fmt.Errorf("cache: multipart upload: %w", err)
 			span.RecordError(err)
+			metrics.ObserveS3Put("error", time.Since(start).Seconds())
 			return err
 		}
 	} else {
 		if _, err := c.client.PutObject(ctx, input); err != nil {
 			err = fmt.Errorf("cache: put object: %w", err)
 			span.RecordError(err)
+			metrics.ObserveS3Put("error", time.Since(start).Seconds())
 			return err
 		}
 	}
 
+	metrics.ObserveS3Put("success", time.Since(start).Seconds())
 	_ = os.Remove(filePath)
 	return nil
 }
