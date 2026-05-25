@@ -114,6 +114,7 @@ config:
   allowedSourceBuckets: ""  # comma-separated; empty = allow all
   allowAllUpstreamGateways: "false"
   allowAllSourceBuckets: "false"
+  s3MultipartThresholdBytes: "5242880"
 
 originVerify:
   secretName: ""

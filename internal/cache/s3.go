@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
@@ -41,15 +43,33 @@ type S3API interface {
 	PutObject(ctx context.Context, params *s3.PutObjectInput, optFns ...func(*s3.Options)) (*s3.PutObjectOutput, error)
 }
 
+// s3Uploader is the interface used for multipart uploads (enables mocking).
+type s3Uploader interface {
+	Upload(ctx context.Context, input *s3.PutObjectInput, opts ...func(*manager.Uploader)) (*manager.UploadOutput, error)
+}
+
 // S3Cache implements Cache backed by an S3 bucket.
 type S3Cache struct {
-	client S3API
-	bucket string
+	client             S3API
+	bucket             string
+	uploader           s3Uploader // nil if multipart not configured
+	multipartThreshold int64      // bytes; 0 means always use PutObject
 }
 
 // NewS3Cache creates a new S3Cache.
 func NewS3Cache(client S3API, bucket string) *S3Cache {
 	return &S3Cache{client: client, bucket: bucket}
+}
+
+// NewS3CacheWithMultipart creates an S3Cache with multipart upload support.
+// Files >= multipartThreshold bytes use manager.Uploader; smaller files use PutObject.
+func NewS3CacheWithMultipart(client S3API, bucket string, uploader s3Uploader, multipartThreshold int64) *S3Cache {
+	return &S3Cache{
+		client:             client,
+		bucket:             bucket,
+		uploader:           uploader,
+		multipartThreshold: multipartThreshold,
+	}
 }
 
 // Get retrieves a cached object. Returns ErrNotFound if the key does not exist.
@@ -86,4 +106,46 @@ func (c *S3Cache) Put(ctx context.Context, key string, body io.Reader, contentTy
 		CacheControl: aws.String("public, max-age=31536000"),
 	})
 	return err
+}
+
+// PutFile stores a local file in the cache. For files smaller than the
+// multipart threshold (or when multipart is not configured), PutObject is used.
+// For files at or above the threshold, manager.Uploader is used.
+// The file is removed after a successful upload.
+func (c *S3Cache) PutFile(ctx context.Context, key, filePath, contentType string) error {
+	if strings.ContainsAny(contentType, "\r\n") {
+		return fmt.Errorf("cache: content type contains illegal control characters")
+	}
+
+	fi, err := os.Stat(filePath)
+	if err != nil {
+		return fmt.Errorf("cache: stat file: %w", err)
+	}
+
+	f, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("cache: open file: %w", err)
+	}
+	defer f.Close()
+
+	input := &s3.PutObjectInput{
+		Bucket:       aws.String(c.bucket),
+		Key:          aws.String(key),
+		Body:         f,
+		ContentType:  aws.String(contentType),
+		CacheControl: aws.String("public, max-age=31536000"),
+	}
+
+	if c.uploader != nil && c.multipartThreshold > 0 && fi.Size() >= c.multipartThreshold {
+		if _, err := c.uploader.Upload(ctx, input); err != nil {
+			return fmt.Errorf("cache: multipart upload: %w", err)
+		}
+	} else {
+		if _, err := c.client.PutObject(ctx, input); err != nil {
+			return fmt.Errorf("cache: put object: %w", err)
+		}
+	}
+
+	_ = os.Remove(filePath)
+	return nil
 }

@@ -20,6 +20,7 @@ import (
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/upstream"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
@@ -61,7 +62,11 @@ func main() {
 		os.Exit(1)
 	}
 
-	s3Cache := cache.NewS3Cache(s3.NewFromConfig(awsCfg), cfg.CacheS3Bucket)
+	s3Client := s3.NewFromConfig(awsCfg)
+	s3Uploader := manager.NewUploader(s3Client, func(u *manager.Uploader) {
+		u.PartSize = cfg.MultipartThresholdBytes
+	})
+	s3Cache := cache.NewS3CacheWithMultipart(s3Client, cfg.CacheS3Bucket, s3Uploader, cfg.MultipartThresholdBytes)
 	asyncCache := cache.WrapAsyncPut(s3Cache, cfg.AsyncCachePutTimeout, cfg.AsyncCachePutConcurrency)
 	sharedTransport := httpclient.NewTransport()
 	imgproxyClient := imgproxy.NewClientWithTransport(cfg.ImgproxyURL, cfg.ImgproxyTimeout, sharedTransport)

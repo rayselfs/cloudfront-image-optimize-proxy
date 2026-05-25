@@ -26,3 +26,4 @@ data:
   {{- end }}
   ALLOW_ALL_UPSTREAM_GATEWAYS: {{ .Values.config.allowAllUpstreamGateways | quote }}
   ALLOW_ALL_SOURCE_BUCKETS: {{ .Values.config.allowAllSourceBuckets | quote }}
+  S3_MULTIPART_THRESHOLD_BYTES: {{ .Values.config.s3MultipartThresholdBytes | quote }}

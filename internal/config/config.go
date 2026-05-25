@@ -19,6 +19,7 @@ const (
 	defaultShutdownTimeout         = 25 * time.Second
 	defaultAsyncCachePutConcurrency = 32
 	defaultAsyncCachePutTimeout     = 30 * time.Second
+	defaultMultipartThresholdBytes int64 = 5 * 1024 * 1024 // 5 MiB
 )
 
 // Config holds the service configuration loaded from environment variables.
@@ -39,6 +40,7 @@ type Config struct {
 	AllowedSourceBuckets        []string
 	AllowAllUpstreamGateways    bool
 	AllowAllSourceBuckets       bool
+	MultipartThresholdBytes     int64
 }
 
 // Load reads service configuration from environment variables.
@@ -78,6 +80,11 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	multipartThreshold, err := loadPositiveInt64("S3_MULTIPART_THRESHOLD_BYTES", defaultMultipartThresholdBytes)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{
 		ListenAddr:                  envOrDefault("LISTEN_ADDR", defaultListenAddr),
 		ImgproxyURL:                 envOrDefault("IMGPROXY_URL", defaultImgproxyURL),
@@ -95,6 +102,7 @@ func Load() (*Config, error) {
 		AllowedSourceBuckets:        loadCSV("ALLOWED_SOURCE_BUCKETS"),
 		AllowAllUpstreamGateways:    loadBool("ALLOW_ALL_UPSTREAM_GATEWAYS"),
 		AllowAllSourceBuckets:       loadBool("ALLOW_ALL_SOURCE_BUCKETS"),
+		MultipartThresholdBytes:     multipartThreshold,
 	}
 
 	if cfg.CacheS3Bucket == "" {
