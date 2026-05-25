@@ -14,6 +14,7 @@ import (
 	appconfig "github.com/rayselfs/cloudfront-image-optimize-proxy/internal/config"
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/handler"
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/imgproxy"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/metrics"
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/middleware"
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/upstream"
 
@@ -37,10 +38,11 @@ func main() {
 	}
 
 	s3Cache := cache.NewS3Cache(s3.NewFromConfig(awsCfg), cfg.CacheS3Bucket)
+	asyncCache := cache.WrapAsyncPut(s3Cache, 30*time.Second)
 	imgproxyClient := imgproxy.NewClient(cfg.ImgproxyURL, cfg.ImgproxyTimeout)
 	resolver := upstream.NewResolver(cfg.UpstreamTimeout, cfg.AllowedUpstreamGateways)
 	coalescer := coalesce.New()
-	imageHandler := handler.New(s3Cache, imgproxyClient, resolver, coalescer, cfg.MaxWidth)
+	imageHandler := handler.New(asyncCache, imgproxyClient, resolver, coalescer, cfg.MaxWidth)
 
 	readyClient := &http.Client{Timeout: 2 * time.Second}
 
@@ -67,9 +69,7 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
-	mux.HandleFunc("GET /metrics", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})
+	mux.Handle("GET /metrics", metrics.Handler())
 	mux.Handle("/", imageHandler)
 
 	srv := &http.Server{
