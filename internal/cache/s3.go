@@ -75,6 +75,9 @@ func (c *S3Cache) Get(ctx context.Context, key string) (io.ReadCloser, string, e
 
 // Put stores an object in the cache with a long-lived Cache-Control header.
 func (c *S3Cache) Put(ctx context.Context, key string, body io.Reader, contentType string) error {
+	if strings.ContainsAny(contentType, "\r\n") {
+		return fmt.Errorf("cache: content type contains illegal control characters")
+	}
 	_, err := c.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:       aws.String(c.bucket),
 		Key:          aws.String(key),

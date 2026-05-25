@@ -96,3 +96,15 @@ func TestCachePut(t *testing.T) {
 		t.Errorf("cacheControl = %q, want %q", aws.ToString(mock.putInput.CacheControl), "public, max-age=31536000")
 	}
 }
+
+func TestS3CachePutInvalidContentType(t *testing.T) {
+	mock := &mockS3{}
+	c := NewS3Cache(mock, "test-bucket")
+	err := c.Put(context.Background(), "some/key", strings.NewReader("data"), "image/png\r\nX-Bad: 1")
+	if err == nil {
+		t.Fatal("expected error for CRLF content type, got nil")
+	}
+	if mock.putInput != nil {
+		t.Fatal("PutObject should not be called when content type is invalid")
+	}
+}

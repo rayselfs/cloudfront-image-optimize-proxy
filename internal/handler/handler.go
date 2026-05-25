@@ -96,6 +96,15 @@ func (h *Handler) passThrough(w http.ResponseWriter, r *http.Request) {
 	}
 	defer body.Close()
 
+	// Validate content type to prevent header injection.
+	if contentType != "" {
+		if err := validatePassThroughContentType(contentType); err != nil {
+			slog.Error("handler: invalid pass-through content type", "error", err)
+			h.writeError(w)
+			return
+		}
+	}
+
 	if h.MaxBodyBytes <= 0 {
 		if contentType != "" {
 			w.Header().Set("Content-Type", contentType)
@@ -147,6 +156,10 @@ func (h *Handler) process(r *http.Request, key string, params *ImageParams) (pro
 	}
 	defer originalBody.Close()
 
+	if strings.ContainsAny(originalContentType, "\r\n") {
+		return processResult{}, fmt.Errorf("upstream returned content type with illegal control characters")
+	}
+
 	originalData, err := h.readBody(originalBody)
 	if err != nil {
 		return processResult{}, err
@@ -176,6 +189,15 @@ func (h *Handler) process(r *http.Request, key string, params *ImageParams) (pro
 	data, err := h.readBody(transformedBody)
 	if err != nil {
 		return processResult{}, err
+	}
+	if err := validateTransformedContentType(transformedContentType); err != nil {
+		slog.Error("handler: imgproxy returned invalid content type",
+			"error", err,
+			"path", r.URL.Path,
+		)
+		metrics.IncImgproxyError()
+		metrics.IncCacheMiss()
+		return processResult{body: originalData, contentType: originalContentType, cacheStatus: "MISS"}, nil
 	}
 	if err := h.Cache.Put(r.Context(), key, bytes.NewReader(data), transformedContentType); err != nil {
 		slog.Error("handler: cache put", "key", key, "error", err)

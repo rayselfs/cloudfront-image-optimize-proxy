@@ -459,6 +459,49 @@ func TestPassThroughOverLimit(t *testing.T) {
 	}
 }
 
+func TestPassThroughCRLFContentType(t *testing.T) {
+	// CR/LF in content type must be rejected (no header injection).
+	c := &mockCache{}
+	tx := &mockTransformer{}
+	r := &mockResolver{body: []byte("data"), contentType: "image/png\r\nX-Injected: evil"}
+	coal := &mockCoalescer{}
+	h := New(c, tx, r, coal, 1920, 0)
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/image.png", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d (CRLF content type must be rejected)", w.Code, http.StatusBadGateway)
+	}
+	if got := w.Header().Get("X-Injected"); got != "" {
+		t.Fatalf("X-Injected header leaked: %q", got)
+	}
+}
+
+func TestTransformNonImageContentType(t *testing.T) {
+	// imgproxy returning non-image content type must fall back to original.
+	c := &mockCache{getErr: cache.ErrNotFound}
+	tx := &mockTransformer{body: []byte("not-an-image"), contentType: "text/html"}
+	r := &mockResolver{sourceURL: "https://origin/img.png", body: []byte("original"), contentType: "image/png"}
+	coal := &mockCoalescer{}
+	h := New(c, tx, r, coal, 1920, 0)
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/img.png?imwidth=640&f=webp&q=80", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if got := w.Body.String(); got != "original" {
+		t.Fatalf("body = %q, want original", got)
+	}
+	if c.putCalls != 0 {
+		t.Fatalf("cache.Put should not be called on invalid transform content type, got %d calls", c.putCalls)
+	}
+}
+
 func TestCacheGetNonMissError(t *testing.T) {
 	// cache.Get returning a non-ErrNotFound error should log and fall through to fetch.
 	c := &mockCache{getErr: errors.New("s3 read error")}
