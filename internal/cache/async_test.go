@@ -158,3 +158,97 @@ func TestAsyncPutCacheKeyRedaction(t *testing.T) {
 	// Release the semaphore.
 	<-a.sem
 }
+
+// blockingInnerCache blocks Put until its block channel is closed.
+type blockingInnerCache struct {
+	block chan struct{}
+}
+
+func (b *blockingInnerCache) Get(ctx context.Context, key string) (io.ReadCloser, string, error) {
+	return nil, "", ErrNotFound
+}
+
+func (b *blockingInnerCache) Put(ctx context.Context, key string, body io.Reader, contentType string) error {
+	select {
+	case <-b.block:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func TestAsyncPutDroppedWhenPoolFull(t *testing.T) {
+	// Pool capacity 1, semaphore pre-filled → next Put is dropped immediately.
+	inner := &syncCache{}
+	a := WrapAsyncPut(inner, 5*time.Second, 1)
+
+	// Occupy the one slot.
+	a.sem <- struct{}{}
+
+	err := a.Put(context.Background(), "some/key", bytes.NewReader([]byte("body")), "image/webp")
+	if err != nil {
+		t.Fatalf("Put returned unexpected error: %v", err)
+	}
+	// Drop is silent (returns nil). Verify no goroutine was launched.
+	// Wait should return immediately because no goroutine was added.
+	done := make(chan struct{})
+	go func() {
+		a.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Wait() blocked unexpectedly after dropped put")
+	}
+
+	// Release the manually held slot.
+	<-a.sem
+}
+
+func TestAsyncPutTimeoutExpires(t *testing.T) {
+	// Inner cache blocks until the context deadline; timeout must fire.
+	block := make(chan struct{})
+	blocking := &blockingInnerCache{block: block}
+	a := WrapAsyncPut(blocking, 50*time.Millisecond, 2) // 50ms timeout
+
+	if err := a.Put(context.Background(), "key1", bytes.NewReader([]byte("x")), "image/webp"); err != nil {
+		t.Fatalf("Put error: %v", err)
+	}
+
+	// Wait should return after the timeout fires (≤ ~500ms with margin).
+	done := make(chan struct{})
+	go func() {
+		a.Wait()
+		close(done)
+	}()
+	// Unblock the inner cache so the goroutine can exit.
+	close(block)
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("Wait() did not return after timeout")
+	}
+}
+
+func TestAsyncPutWaitDrainsAll(t *testing.T) {
+	// All puts must finish before Wait returns.
+	inner := &syncCache{}
+	a := WrapAsyncPut(inner, 5*time.Second, 4)
+	const n = 4
+	for i := 0; i < n; i++ {
+		body := bytes.NewReader([]byte("data"))
+		if err := a.Put(context.Background(), "key", body, "image/webp"); err != nil {
+			t.Fatalf("Put error: %v", err)
+		}
+	}
+	a.Wait()
+	// All puts completed; inner.calls should equal n (or ≥ n if some ran fast).
+	// We just assert no panic and Wait returned.
+	inner.mu.Lock()
+	calls := inner.calls
+	inner.mu.Unlock()
+	if calls != n {
+		t.Errorf("inner.Put calls after Wait = %d, want %d", calls, n)
+	}
+}
