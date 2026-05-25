@@ -61,7 +61,7 @@ func main() {
 	}
 
 	s3Cache := cache.NewS3Cache(s3.NewFromConfig(awsCfg), cfg.CacheS3Bucket)
-	asyncCache := cache.WrapAsyncPut(s3Cache, 30*time.Second)
+	asyncCache := cache.WrapAsyncPut(s3Cache, cfg.AsyncCachePutTimeout, cfg.AsyncCachePutConcurrency)
 	imgproxyClient := imgproxy.NewClient(cfg.ImgproxyURL, cfg.ImgproxyTimeout)
 	resolver := upstream.NewResolver(cfg.UpstreamTimeout, cfg.AllowedUpstreamGateways, cfg.AllowedSourceBuckets)
 	coalescer := coalesce.New()

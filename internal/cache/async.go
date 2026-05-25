@@ -10,8 +10,6 @@ import (
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/metrics"
 )
 
-const maxConcurrentPuts = 32
-
 // AsyncPutCache wraps a Cache and executes Put operations in background goroutines.
 // Use Wait to drain in-flight puts during graceful shutdown.
 type AsyncPutCache struct {
@@ -22,12 +20,12 @@ type AsyncPutCache struct {
 }
 
 // WrapAsyncPut wraps c so that Put is executed in a background goroutine.
-// Concurrency is capped at maxConcurrentPuts; excess puts are dropped and logged.
-func WrapAsyncPut(c Cache, timeout time.Duration) *AsyncPutCache {
+// Concurrency is capped at maxConcurrency; excess puts are dropped and logged.
+func WrapAsyncPut(c Cache, timeout time.Duration, maxConcurrency int) *AsyncPutCache {
 	return &AsyncPutCache{
 		inner:   c,
 		timeout: timeout,
-		sem:     make(chan struct{}, maxConcurrentPuts),
+		sem:     make(chan struct{}, maxConcurrency),
 	}
 }
 

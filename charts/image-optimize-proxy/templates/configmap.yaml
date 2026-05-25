@@ -13,6 +13,8 @@ data:
   UPSTREAM_TIMEOUT: {{ .Values.config.upstreamTimeout | quote }}
   IMGPROXY_TIMEOUT: {{ .Values.config.imgproxyTimeout | quote }}
   SHUTDOWN_TIMEOUT: {{ .Values.config.shutdownTimeout | quote }}
+  ASYNC_CACHE_PUT_CONCURRENCY: {{ .Values.config.asyncCachePutConcurrency | quote }}
+  ASYNC_CACHE_PUT_TIMEOUT_SECONDS: {{ .Values.config.asyncCachePutTimeoutSeconds | quote }}
   {{- if .Values.config.maxBodyBytes }}
   MAX_BODY_BYTES: {{ .Values.config.maxBodyBytes | quote }}
   {{- end }}

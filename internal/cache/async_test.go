@@ -35,7 +35,7 @@ func (s *syncCache) Put(_ context.Context, key string, body io.Reader, contentTy
 
 func TestWrapAsyncPutReturnsImmediately(t *testing.T) {
 	inner := &syncCache{}
-	wrapped := WrapAsyncPut(inner, 5*time.Second)
+	wrapped := WrapAsyncPut(inner, 5*time.Second, 32)
 
 	start := time.Now()
 	err := wrapped.Put(context.Background(), "key", bytes.NewReader([]byte("data")), "image/webp")
@@ -52,7 +52,7 @@ func TestWrapAsyncPutReturnsImmediately(t *testing.T) {
 
 func TestWrapAsyncPutDelegatesData(t *testing.T) {
 	inner := &syncCache{}
-	wrapped := WrapAsyncPut(inner, 5*time.Second)
+	wrapped := WrapAsyncPut(inner, 5*time.Second, 32)
 
 	data := []byte("hello-image")
 	_ = wrapped.Put(context.Background(), "mykey", bytes.NewReader(data), "image/avif")
@@ -78,7 +78,7 @@ func TestWrapAsyncPutDelegatesData(t *testing.T) {
 
 func TestWrapAsyncPutGetPassThrough(t *testing.T) {
 	inner := &syncCache{}
-	wrapped := WrapAsyncPut(inner, 5*time.Second)
+	wrapped := WrapAsyncPut(inner, 5*time.Second, 32)
 
 	_, _, err := wrapped.Get(context.Background(), "key")
 	if err != ErrNotFound {
@@ -88,7 +88,7 @@ func TestWrapAsyncPutGetPassThrough(t *testing.T) {
 
 func TestWrapAsyncPutWait(t *testing.T) {
 	inner := &syncCache{}
-	wrapped := WrapAsyncPut(inner, 5*time.Second)
+	wrapped := WrapAsyncPut(inner, 5*time.Second, 32)
 
 	const n = 5
 	for i := 0; i < n; i++ {
@@ -104,5 +104,27 @@ func TestWrapAsyncPutWait(t *testing.T) {
 
 	if calls != n {
 		t.Errorf("inner.Put calls after Wait = %d, want %d", calls, n)
+	}
+}
+
+func TestWrapAsyncPutCustomConcurrency(t *testing.T) {
+	inner := &syncCache{}
+	a := WrapAsyncPut(inner, 5*time.Second, 4)
+	if cap(a.sem) != 4 {
+		t.Fatalf("sem capacity = %d, want 4", cap(a.sem))
+	}
+	if a.timeout != 5*time.Second {
+		t.Fatalf("timeout = %v, want 5s", a.timeout)
+	}
+}
+
+func TestWrapAsyncPutDefaults(t *testing.T) {
+	inner := &syncCache{}
+	a := WrapAsyncPut(inner, 30*time.Second, 32)
+	if cap(a.sem) != 32 {
+		t.Fatalf("sem capacity = %d, want 32", cap(a.sem))
+	}
+	if a.timeout != 30*time.Second {
+		t.Fatalf("timeout = %v, want 30s", a.timeout)
 	}
 }

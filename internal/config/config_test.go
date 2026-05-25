@@ -2,6 +2,7 @@ package config
 
 import (
 	"testing"
+	"time"
 )
 
 func TestDefaultConfig(t *testing.T) {
@@ -235,5 +236,48 @@ func TestAllowlistValidation(t *testing.T) {
 				t.Fatalf("Load() error = %v, wantErr = %v", err, tc.wantErr)
 			}
 		})
+	}
+}
+
+func TestAsyncCachePutConcurrencyZeroRejected(t *testing.T) {
+	t.Setenv("CACHE_S3_BUCKET", "test-bucket")
+	t.Setenv("ASYNC_CACHE_PUT_CONCURRENCY", "0")
+	t.Setenv("ALLOW_ALL_UPSTREAM_GATEWAYS", "true")
+	t.Setenv("ALLOW_ALL_SOURCE_BUCKETS", "true")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want error for ASYNC_CACHE_PUT_CONCURRENCY=0")
+	}
+}
+
+func TestAsyncCachePutTimeoutZeroRejected(t *testing.T) {
+	t.Setenv("CACHE_S3_BUCKET", "test-bucket")
+	t.Setenv("ASYNC_CACHE_PUT_TIMEOUT_SECONDS", "0")
+	t.Setenv("ALLOW_ALL_UPSTREAM_GATEWAYS", "true")
+	t.Setenv("ALLOW_ALL_SOURCE_BUCKETS", "true")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want error for ASYNC_CACHE_PUT_TIMEOUT_SECONDS=0")
+	}
+}
+
+func TestAsyncCachePutCustomValues(t *testing.T) {
+	t.Setenv("CACHE_S3_BUCKET", "test-bucket")
+	t.Setenv("ASYNC_CACHE_PUT_CONCURRENCY", "8")
+	t.Setenv("ASYNC_CACHE_PUT_TIMEOUT_SECONDS", "60")
+	t.Setenv("ALLOW_ALL_UPSTREAM_GATEWAYS", "true")
+	t.Setenv("ALLOW_ALL_SOURCE_BUCKETS", "true")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.AsyncCachePutConcurrency != 8 {
+		t.Fatalf("AsyncCachePutConcurrency = %d, want 8", cfg.AsyncCachePutConcurrency)
+	}
+	if cfg.AsyncCachePutTimeout != 60*time.Second {
+		t.Fatalf("AsyncCachePutTimeout = %v, want 60s", cfg.AsyncCachePutTimeout)
 	}
 }

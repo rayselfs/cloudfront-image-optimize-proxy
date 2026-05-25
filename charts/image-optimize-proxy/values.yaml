@@ -108,6 +108,8 @@ config:
   imgproxyTimeout: "30"
   shutdownTimeout: "25"  # seconds; must be < terminationGracePeriodSeconds
   imgproxyUrl: "http://localhost:8081"
+  asyncCachePutConcurrency: "32"
+  asyncCachePutTimeoutSeconds: "30"
   allowedUpstreamGateways: ""
   allowedSourceBuckets: ""  # comma-separated; empty = allow all
   allowAllUpstreamGateways: "false"

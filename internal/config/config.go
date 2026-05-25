@@ -9,14 +9,16 @@ import (
 )
 
 const (
-	defaultListenAddr      = ":9999"
-	defaultImgproxyURL     = "http://localhost:8081"
-	defaultCacheS3Region   = "us-west-2"
-	defaultMaxWidth        = 1920
-	defaultMaxBodyBytes    = 20 * 1024 * 1024 // 20 MB
-	defaultUpstreamTimeout = 30 * time.Second
-	defaultImgproxyTimeout = 30 * time.Second
-	defaultShutdownTimeout = 25 * time.Second
+	defaultListenAddr              = ":9999"
+	defaultImgproxyURL             = "http://localhost:8081"
+	defaultCacheS3Region           = "us-west-2"
+	defaultMaxWidth                = 1920
+	defaultMaxBodyBytes            = 20 * 1024 * 1024 // 20 MB
+	defaultUpstreamTimeout         = 30 * time.Second
+	defaultImgproxyTimeout         = 30 * time.Second
+	defaultShutdownTimeout         = 25 * time.Second
+	defaultAsyncCachePutConcurrency = 32
+	defaultAsyncCachePutTimeout     = 30 * time.Second
 )
 
 // Config holds the service configuration loaded from environment variables.
@@ -30,6 +32,8 @@ type Config struct {
 	UpstreamTimeout             time.Duration
 	ImgproxyTimeout             time.Duration
 	ShutdownTimeout             time.Duration
+	AsyncCachePutConcurrency    int
+	AsyncCachePutTimeout        time.Duration
 	OriginSecrets               []string
 	AllowedUpstreamGateways     []string
 	AllowedSourceBuckets        []string
@@ -64,6 +68,16 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	asyncCachePutConcurrency, err := loadPositiveInt("ASYNC_CACHE_PUT_CONCURRENCY", defaultAsyncCachePutConcurrency)
+	if err != nil {
+		return nil, err
+	}
+
+	asyncCachePutTimeout, err := loadDurationSeconds("ASYNC_CACHE_PUT_TIMEOUT_SECONDS", 30)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{
 		ListenAddr:                  envOrDefault("LISTEN_ADDR", defaultListenAddr),
 		ImgproxyURL:                 envOrDefault("IMGPROXY_URL", defaultImgproxyURL),
@@ -74,6 +88,8 @@ func Load() (*Config, error) {
 		UpstreamTimeout:             upstreamTimeout,
 		ImgproxyTimeout:             imgproxyTimeout,
 		ShutdownTimeout:             shutdownTimeout,
+		AsyncCachePutConcurrency:    asyncCachePutConcurrency,
+		AsyncCachePutTimeout:        asyncCachePutTimeout,
 		OriginSecrets:               loadCSV("CF_ORIGIN_SECRET"),
 		AllowedUpstreamGateways:     loadCSV("ALLOWED_UPSTREAM_GATEWAYS"),
 		AllowedSourceBuckets:        loadCSV("ALLOWED_SOURCE_BUCKETS"),
