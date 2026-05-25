@@ -66,27 +66,42 @@ func (m *mockTransformer) Transform(ctx context.Context, sourceURL string, param
 }
 
 type mockResolver struct {
-	sourceURL   string
-	body        []byte
-	contentType string
-	err         error
-	fetchErr    error
-	calls       int
-	fetchCalls  int
+	sourceURL       string
+	body            []byte
+	contentType     string
+	headContentType string
+	err             error
+	fetchErr        error
+	headErr         error
+	calls           int
+	fetchCalls      int
+	headCalls       int
 }
 
-func (m *mockResolver) Resolve(r *http.Request) (string, func() (io.ReadCloser, string, error), error) {
+func (m *mockResolver) Resolve(r *http.Request) (string, func() (string, error), func() (io.ReadCloser, string, error), error) {
 	m.calls++
 	if m.err != nil {
-		return "", nil, m.err
+		return "", nil, nil, m.err
 	}
-	return m.sourceURL, func() (io.ReadCloser, string, error) {
+	headCT := m.headContentType
+	if headCT == "" {
+		headCT = m.contentType
+	}
+	headFunc := func() (string, error) {
+		m.headCalls++
+		if m.headErr != nil {
+			return "", m.headErr
+		}
+		return headCT, nil
+	}
+	fetchFunc := func() (io.ReadCloser, string, error) {
 		m.fetchCalls++
 		if m.fetchErr != nil {
 			return nil, "", m.fetchErr
 		}
 		return io.NopCloser(bytes.NewReader(m.body)), m.contentType, nil
-	}, nil
+	}
+	return m.sourceURL, headFunc, fetchFunc, nil
 }
 
 type mockCoalescer struct {
@@ -181,8 +196,8 @@ func TestPassThrough(t *testing.T) {
 	if coal.calls != 0 {
 		t.Fatalf("coalescer calls = %d, want 0", coal.calls)
 	}
-	if r.calls != 1 || r.fetchCalls != 1 {
-		t.Fatalf("resolver calls=%d fetch=%d, want 1/1", r.calls, r.fetchCalls)
+	if r.calls != 1 || r.fetchCalls != 1 || r.headCalls != 0 {
+		t.Fatalf("resolver calls=%d fetch=%d head=%d, want 1/1/0", r.calls, r.fetchCalls, r.headCalls)
 	}
 }
 
@@ -236,8 +251,34 @@ func TestCacheMissTransform(t *testing.T) {
 	if tx.calls != 1 || tx.sourceURL != "https://origin/image.png" {
 		t.Fatalf("transform calls=%d source=%q", tx.calls, tx.sourceURL)
 	}
-	if r.calls != 1 || r.fetchCalls != 1 {
-		t.Fatalf("resolver calls=%d fetch=%d, want 1/1", r.calls, r.fetchCalls)
+	if r.calls != 1 || r.fetchCalls != 0 || r.headCalls != 1 {
+		t.Fatalf("resolver calls=%d fetch=%d head=%d, want 1/0/1", r.calls, r.fetchCalls, r.headCalls)
+	}
+}
+
+func TestCacheMissTransformNoFetch(t *testing.T) {
+	c := &mockCache{getErr: cache.ErrNotFound}
+	tx := &mockTransformer{body: []byte("transformed"), contentType: "image/avif"}
+	r := &mockResolver{
+		sourceURL:       "https://origin/image.png",
+		contentType:     "image/png",
+		headContentType: "image/png",
+	}
+	coal := &mockCoalescer{}
+	h := New(c, tx, r, coal, 1920, 0)
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/img.png?imwidth=640&f=avif&q=80", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if r.fetchCalls != 0 {
+		t.Fatalf("fetchCalls = %d, want 0 (successful transform must not fetch original)", r.fetchCalls)
+	}
+	if r.headCalls != 1 {
+		t.Fatalf("headCalls = %d, want 1", r.headCalls)
 	}
 }
 
@@ -259,8 +300,8 @@ func TestImgproxyFailure(t *testing.T) {
 	if got := w.Header().Get("X-Cache"); got != "MISS" {
 		t.Fatalf("X-Cache = %q, want MISS", got)
 	}
-	if r.fetchCalls != 1 {
-		t.Fatalf("fetch calls = %d, want 1 (original body buffered, no second fetch)", r.fetchCalls)
+	if r.fetchCalls != 1 || r.headCalls != 1 {
+		t.Fatalf("fetch calls = %d head calls = %d, want 1/1", r.fetchCalls, r.headCalls)
 	}
 	if c.putCalls != 0 {
 		t.Fatalf("cache put calls = %d, want 0", c.putCalls)
@@ -270,7 +311,7 @@ func TestImgproxyFailure(t *testing.T) {
 func TestNonImagePassThrough(t *testing.T) {
 	c := &mockCache{getErr: cache.ErrNotFound}
 	tx := &mockTransformer{}
-	r := &mockResolver{sourceURL: "https://origin/page", body: []byte("<html></html>"), contentType: "text/html"}
+	r := &mockResolver{sourceURL: "https://origin/page", body: []byte("<html></html>"), contentType: "text/html", headContentType: "text/html"}
 	coal := &mockCoalescer{}
 	h := New(c, tx, r, coal, 1920, 0)
 
@@ -404,7 +445,7 @@ func TestCachePutError(t *testing.T) {
 func TestMaxBodyBytesExceeded(t *testing.T) {
 	c := &mockCache{getErr: cache.ErrNotFound}
 	tx := &mockTransformer{body: []byte("big transformed body"), contentType: "image/webp"}
-	r := &mockResolver{sourceURL: "https://origin/image.png", body: []byte("original body"), contentType: "image/png"}
+	r := &mockResolver{sourceURL: "https://origin/image.png", body: []byte("original body"), contentType: "image/png", headContentType: "image/png"}
 	coal := &mockCoalescer{}
 	// Set limit to 5 bytes — original body "original body" exceeds it.
 	h := New(c, tx, r, coal, 1920, 5)

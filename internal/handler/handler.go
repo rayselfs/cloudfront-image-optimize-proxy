@@ -81,7 +81,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) passThrough(w http.ResponseWriter, r *http.Request) {
-	_, fetchFunc, err := h.Resolver.Resolve(r)
+	_, _, fetchFunc, err := h.Resolver.Resolve(r)
 	if err != nil {
 		slog.Error("handler: resolve pass-through", "error", err)
 		h.writeError(w)
@@ -145,27 +145,30 @@ func (h *Handler) process(r *http.Request, key string, params *ImageParams) (pro
 		slog.Error("handler: cache get", "key", key, "error", err)
 	}
 
-	sourceURL, fetchFunc, err := h.Resolver.Resolve(r)
+	sourceURL, headFunc, fetchFunc, err := h.Resolver.Resolve(r)
 	if err != nil {
 		return processResult{}, err
 	}
 
-	originalBody, originalContentType, err := fetchFunc()
-	if err != nil {
-		return processResult{}, err
-	}
-	defer originalBody.Close()
-
-	if strings.ContainsAny(originalContentType, "\r\n") {
-		return processResult{}, fmt.Errorf("upstream returned content type with illegal control characters")
+	headContentType, headErr := headFunc()
+	if headErr != nil {
+		slog.Error("handler: HEAD upstream failed", "error", headErr, "path", r.URL.Path)
+		return processResult{}, headErr
 	}
 
-	originalData, err := h.readBody(originalBody)
-	if err != nil {
-		return processResult{}, err
-	}
-
-	if !strings.HasPrefix(originalContentType, "image/") {
+	if headContentType != "" && !strings.HasPrefix(headContentType, "image/") {
+		originalBody, originalContentType, err := fetchFunc()
+		if err != nil {
+			return processResult{}, err
+		}
+		defer originalBody.Close()
+		if strings.ContainsAny(originalContentType, "\r\n") {
+			return processResult{}, fmt.Errorf("upstream returned content type with illegal control characters")
+		}
+		originalData, err := h.readBody(originalBody)
+		if err != nil {
+			return processResult{}, err
+		}
 		metrics.IncCacheBypass()
 		return processResult{body: originalData, contentType: originalContentType, cacheStatus: "BYPASS"}, nil
 	}
@@ -176,11 +179,20 @@ func (h *Handler) process(r *http.Request, key string, params *ImageParams) (pro
 		Quality: params.Quality,
 	})
 	if err != nil {
-		slog.Error("handler: transform failed, using original",
+		slog.Error("handler: transform failed, fetching original fallback",
 			"error", err,
 			"path", r.URL.Path,
 		)
 		metrics.IncImgproxyError()
+		originalBody, originalContentType, fetchErr := fetchFunc()
+		if fetchErr != nil {
+			return processResult{}, fetchErr
+		}
+		defer originalBody.Close()
+		originalData, err := h.readBody(originalBody)
+		if err != nil {
+			return processResult{}, err
+		}
 		metrics.IncCacheMiss()
 		return processResult{body: originalData, contentType: originalContentType, cacheStatus: "MISS"}, nil
 	}
@@ -196,6 +208,15 @@ func (h *Handler) process(r *http.Request, key string, params *ImageParams) (pro
 			"path", r.URL.Path,
 		)
 		metrics.IncImgproxyError()
+		originalBody, originalContentType, fetchErr := fetchFunc()
+		if fetchErr != nil {
+			return processResult{}, fetchErr
+		}
+		defer originalBody.Close()
+		originalData, err := h.readBody(originalBody)
+		if err != nil {
+			return processResult{}, err
+		}
 		metrics.IncCacheMiss()
 		return processResult{body: originalData, contentType: originalContentType, cacheStatus: "MISS"}, nil
 	}

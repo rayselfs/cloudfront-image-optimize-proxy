@@ -17,10 +17,11 @@ import (
 )
 
 type mockPresigner struct {
-	t        *testing.T
-	bucket   string
-	key      string
-	response string
+	t            *testing.T
+	bucket       string
+	key          string
+	response     string
+	headResponse string
 }
 
 func (m mockPresigner) PresignGetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.PresignOptions)) (*v4.PresignedHTTPRequest, error) {
@@ -32,6 +33,21 @@ func (m mockPresigner) PresignGetObject(ctx context.Context, params *s3.GetObjec
 		m.t.Fatalf("Key = %q, want %q", got, m.key)
 	}
 	return &v4.PresignedHTTPRequest{URL: m.response}, nil
+}
+
+func (m mockPresigner) PresignHeadObject(ctx context.Context, params *s3.HeadObjectInput, optFns ...func(*s3.PresignOptions)) (*v4.PresignedHTTPRequest, error) {
+	m.t.Helper()
+	if got := aws.ToString(params.Bucket); got != m.bucket {
+		m.t.Fatalf("Bucket = %q, want %q", got, m.bucket)
+	}
+	if got := aws.ToString(params.Key); got != m.key {
+		m.t.Fatalf("Key = %q, want %q", got, m.key)
+	}
+	response := m.headResponse
+	if response == "" {
+		response = "https://s3.example.com/presigned-head"
+	}
+	return &v4.PresignedHTTPRequest{URL: response}, nil
 }
 
 func TestResolveS3(t *testing.T) {
@@ -48,10 +64,11 @@ func TestResolveS3(t *testing.T) {
 	originalNewS3Presigner := newS3Presigner
 	newS3Presigner = func(ctx context.Context) (s3Presigner, error) {
 		return mockPresigner{
-			t:        t,
-			bucket:   "source-bucket",
-			key:      "images/cat.png",
-			response: server.URL + "/presigned",
+			t:            t,
+			bucket:       "source-bucket",
+			key:          "images/cat.png",
+			response:     server.URL + "/presigned",
+			headResponse: server.URL + "/presigned-head",
 		}, nil
 	}
 	t.Cleanup(func() { newS3Presigner = originalNewS3Presigner })
@@ -60,12 +77,15 @@ func TestResolveS3(t *testing.T) {
 	req.Header.Set("X-Img-Source-Type", "s3")
 	req.Header.Set("X-Img-Source-Bucket", "source-bucket")
 
-	sourceURL, fetchFunc, err := NewResolver(30*time.Second, nil, nil).Resolve(req)
+	sourceURL, headFunc, fetchFunc, err := NewResolver(30*time.Second, nil, nil).Resolve(req)
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
 	if sourceURL != server.URL+"/presigned" {
 		t.Fatalf("sourceURL = %q, want presigned URL", sourceURL)
+	}
+	if headFunc == nil {
+		t.Fatal("headFunc = nil, want function")
 	}
 
 	body, contentType, err := fetchFunc()
@@ -86,6 +106,49 @@ func TestResolveS3(t *testing.T) {
 	}
 }
 
+func TestResolveS3Head(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodHead {
+			t.Fatalf("method = %s, want HEAD", r.Method)
+		}
+		if r.URL.Path != "/presigned-head" {
+			t.Fatalf("path = %q, want /presigned-head", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "image/png")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	originalNewS3Presigner := newS3Presigner
+	newS3Presigner = func(ctx context.Context) (s3Presigner, error) {
+		return mockPresigner{
+			t:            t,
+			bucket:       "source-bucket",
+			key:          "images/cat.png",
+			response:     server.URL + "/presigned-get",
+			headResponse: server.URL + "/presigned-head",
+		}, nil
+	}
+	t.Cleanup(func() { newS3Presigner = originalNewS3Presigner })
+
+	req := httptest.NewRequest(http.MethodGet, "http://origin.example/images/cat.png?width=640", nil)
+	req.Header.Set("X-Img-Source-Type", "s3")
+	req.Header.Set("X-Img-Source-Bucket", "source-bucket")
+
+	_, headFunc, _, err := NewResolver(30*time.Second, nil, nil).Resolve(req)
+	if err != nil {
+		t.Fatalf("Resolve() error = %v", err)
+	}
+
+	contentType, err := headFunc()
+	if err != nil {
+		t.Fatalf("headFunc() error = %v", err)
+	}
+	if contentType != "image/png" {
+		t.Fatalf("contentType = %q, want %q", contentType, "image/png")
+	}
+}
+
 func TestResolveGatewayFromHeader(t *testing.T) {
 	var gotHost string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -103,12 +166,23 @@ func TestResolveGatewayFromHeader(t *testing.T) {
 	req.Host = "assets.example"
 	req.Header.Set("X-Img-Upstream-Gateway", server.URL)
 
-	sourceURL, fetchFunc, err := NewResolver(30*time.Second, nil, nil).Resolve(req)
+	sourceURL, headFunc, fetchFunc, err := NewResolver(30*time.Second, nil, nil).Resolve(req)
 	if err != nil {
 		t.Fatalf("Resolve() error = %v", err)
 	}
 	if sourceURL != server.URL+"/images/cat.jpg?width=640" {
 		t.Fatalf("sourceURL = %q, want gateway URL", sourceURL)
+	}
+	if headFunc == nil {
+		t.Fatal("headFunc = nil, want function")
+	}
+
+	headContentType, err := headFunc()
+	if err != nil {
+		t.Fatalf("headFunc() error = %v", err)
+	}
+	if headContentType != "image/jpeg" {
+		t.Fatalf("head contentType = %q, want %q", headContentType, "image/jpeg")
 	}
 
 	body, contentType, err := fetchFunc()
@@ -135,7 +209,7 @@ func TestResolveGatewayFromHeader(t *testing.T) {
 func TestResolveGatewayMissingHeader(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://assets.example/images/cat.jpg", nil)
 
-	_, _, err := NewResolver(30*time.Second, nil, nil).Resolve(req)
+	_, _, _, err := NewResolver(30*time.Second, nil, nil).Resolve(req)
 	if err == nil {
 		t.Fatal("Resolve() error = nil, want error for missing X-Img-Upstream-Gateway")
 	}
@@ -157,7 +231,7 @@ func TestResolveGatewayAllowlistAllowed(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://assets.example/img/cat.jpg", nil)
 	req.Header.Set("X-Img-Upstream-Gateway", server.URL)
 
-	_, _, err := NewResolver(30*time.Second, []string{serverHost}, nil).Resolve(req)
+	_, _, _, err := NewResolver(30*time.Second, []string{serverHost}, nil).Resolve(req)
 	if err != nil {
 		t.Fatalf("Resolve() error = %v, want nil (allowed gateway)", err)
 	}
@@ -167,7 +241,7 @@ func TestResolveGatewayAllowlistBlocked(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://assets.example/img/cat.jpg", nil)
 	req.Header.Set("X-Img-Upstream-Gateway", "http://evil.example.com")
 
-	_, _, err := NewResolver(30*time.Second, []string{"trusted.example.com"}, nil).Resolve(req)
+	_, _, _, err := NewResolver(30*time.Second, []string{"trusted.example.com"}, nil).Resolve(req)
 	if err == nil {
 		t.Fatal("Resolve() error = nil, want error for blocked gateway")
 	}
@@ -187,7 +261,7 @@ func TestResolveGatewayAllowlistEmpty(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "http://assets.example/img/cat.jpg", nil)
 	req.Header.Set("X-Img-Upstream-Gateway", server.URL)
 
-	_, _, err := NewResolver(30*time.Second, nil, nil).Resolve(req)
+	_, _, _, err := NewResolver(30*time.Second, nil, nil).Resolve(req)
 	if err != nil {
 		t.Fatalf("Resolve() error = %v, want nil (no allowlist)", err)
 	}
@@ -198,7 +272,7 @@ func TestResolveS3MissingBucket(t *testing.T) {
 	req.Header.Set("X-Img-Source-Type", "s3")
 	// deliberately omit X-Img-Source-Bucket
 
-	_, _, err := NewResolver(30*time.Second, nil, nil).Resolve(req)
+	_, _, _, err := NewResolver(30*time.Second, nil, nil).Resolve(req)
 	if err == nil {
 		t.Fatal("Resolve() error = nil, want error for missing X-Img-Source-Bucket")
 	}
@@ -218,7 +292,7 @@ func TestResolveS3BucketAllowlistBlocked(t *testing.T) {
 	req.Header.Set("X-Img-Source-Type", "s3")
 	req.Header.Set("X-Img-Source-Bucket", "evil-bucket")
 
-	_, _, err := NewResolver(30*time.Second, nil, []string{"allowed-bucket"}).Resolve(req)
+	_, _, _, err := NewResolver(30*time.Second, nil, []string{"allowed-bucket"}).Resolve(req)
 	if err == nil {
 		t.Fatal("Resolve() error = nil, want error for blocked bucket")
 	}
@@ -245,7 +319,7 @@ func TestResolveS3BucketAllowlistAllowed(t *testing.T) {
 	req.Header.Set("X-Img-Source-Type", "s3")
 	req.Header.Set("X-Img-Source-Bucket", "allowed-bucket")
 
-	_, _, err := NewResolver(30*time.Second, nil, []string{"allowed-bucket"}).Resolve(req)
+	_, _, _, err := NewResolver(30*time.Second, nil, []string{"allowed-bucket"}).Resolve(req)
 	if err != nil {
 		t.Fatalf("Resolve() error = %v, want nil (allowed bucket)", err)
 	}

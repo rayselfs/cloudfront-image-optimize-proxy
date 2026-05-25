@@ -19,11 +19,12 @@ import (
 
 // Resolver determines the upstream source for an image.
 type Resolver interface {
-	Resolve(r *http.Request) (sourceURL string, fetchFunc func() (io.ReadCloser, string, error), err error)
+	Resolve(r *http.Request) (sourceURL string, headFunc func() (string, error), fetchFunc func() (io.ReadCloser, string, error), err error)
 }
 
 type s3Presigner interface {
 	PresignGetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.PresignOptions)) (*v4.PresignedHTTPRequest, error)
+	PresignHeadObject(ctx context.Context, params *s3.HeadObjectInput, optFns ...func(*s3.PresignOptions)) (*v4.PresignedHTTPRequest, error)
 }
 
 var newS3Presigner = func(ctx context.Context) (s3Presigner, error) {
@@ -97,15 +98,15 @@ func NewResolverWithEagerPresigner(ctx context.Context, timeout time.Duration, a
 	}, nil
 }
 
-// Resolve returns the source URL that imgproxy should read and a fallback fetch function.
-func (d *DefaultResolver) Resolve(r *http.Request) (string, func() (io.ReadCloser, string, error), error) {
+// Resolve returns the source URL that imgproxy should read plus HEAD and fallback fetch functions.
+func (d *DefaultResolver) Resolve(r *http.Request) (string, func() (string, error), func() (io.ReadCloser, string, error), error) {
 	if r.Header.Get("X-Img-Source-Type") == "s3" {
 		return d.resolveS3(r)
 	}
 
 	rawGateway := strings.TrimSpace(r.Header.Get("X-Img-Upstream-Gateway"))
 	if rawGateway == "" {
-		return "", nil, fmt.Errorf("X-Img-Upstream-Gateway header is required")
+		return "", nil, nil, fmt.Errorf("X-Img-Upstream-Gateway header is required")
 	}
 
 	if !strings.Contains(rawGateway, "://") {
@@ -113,7 +114,7 @@ func (d *DefaultResolver) Resolve(r *http.Request) (string, func() (io.ReadClose
 	}
 	gatewayURL, err := url.Parse(rawGateway)
 	if err != nil || gatewayURL.Host == "" {
-		return "", nil, fmt.Errorf("X-Img-Upstream-Gateway has invalid value")
+		return "", nil, nil, fmt.Errorf("X-Img-Upstream-Gateway has invalid value")
 	}
 
 	if len(d.allowedGateways) > 0 {
@@ -125,22 +126,25 @@ func (d *DefaultResolver) Resolve(r *http.Request) (string, func() (io.ReadClose
 			}
 		}
 		if !allowed {
-			return "", nil, fmt.Errorf("upstream gateway not in allowlist")
+			return "", nil, nil, fmt.Errorf("upstream gateway not in allowlist")
 		}
 	}
 
 	sourceURL := gatewayURL.Scheme + "://" + gatewayURL.Host + requestURI(r)
+	headFunc := func() (string, error) {
+		return d.headHTTP(r.Context(), sourceURL, r.Host)
+	}
 	fetchFunc := func() (io.ReadCloser, string, error) {
 		return d.fetchHTTP(r.Context(), sourceURL, r.Host)
 	}
 
-	return sourceURL, fetchFunc, nil
+	return sourceURL, headFunc, fetchFunc, nil
 }
 
-func (d *DefaultResolver) resolveS3(r *http.Request) (string, func() (io.ReadCloser, string, error), error) {
+func (d *DefaultResolver) resolveS3(r *http.Request) (string, func() (string, error), func() (io.ReadCloser, string, error), error) {
 	bucket := strings.TrimSpace(r.Header.Get("X-Img-Source-Bucket"))
 	if bucket == "" {
-		return "", nil, fmt.Errorf("X-Img-Source-Bucket is required for s3 source")
+		return "", nil, nil, fmt.Errorf("X-Img-Source-Bucket is required for s3 source")
 	}
 
 	if len(d.allowedSourceBuckets) > 0 {
@@ -152,7 +156,7 @@ func (d *DefaultResolver) resolveS3(r *http.Request) (string, func() (io.ReadClo
 			}
 		}
 		if !allowed {
-			return "", nil, fmt.Errorf("source bucket %q not in allowlist", bucket)
+			return "", nil, nil, fmt.Errorf("source bucket %q not in allowlist", bucket)
 		}
 	}
 
@@ -161,7 +165,7 @@ func (d *DefaultResolver) resolveS3(r *http.Request) (string, func() (io.ReadClo
 			d.presigner, d.presignerErr = newS3Presigner(context.Background())
 		})
 		if d.presignerErr != nil {
-			return "", nil, d.presignerErr
+			return "", nil, nil, d.presignerErr
 		}
 	}
 
@@ -170,7 +174,7 @@ func (d *DefaultResolver) resolveS3(r *http.Request) (string, func() (io.ReadClo
 		Key:    aws.String(strings.TrimPrefix(r.URL.Path, "/")),
 	})
 	if err != nil {
-		return "", nil, err
+		return "", nil, nil, err
 	}
 
 	sourceURL := presigned.URL
@@ -178,7 +182,19 @@ func (d *DefaultResolver) resolveS3(r *http.Request) (string, func() (io.ReadClo
 		return d.fetchHTTP(r.Context(), sourceURL, "")
 	}
 
-	return sourceURL, fetchFunc, nil
+	headPresigned, err := d.presigner.PresignHeadObject(r.Context(), &s3.HeadObjectInput{
+		Bucket: aws.String(bucket),
+		Key:    aws.String(strings.TrimPrefix(r.URL.Path, "/")),
+	})
+	if err != nil {
+		return "", nil, nil, err
+	}
+	headURL := headPresigned.URL
+	headFunc := func() (string, error) {
+		return d.headHTTP(r.Context(), headURL, "")
+	}
+
+	return sourceURL, headFunc, fetchFunc, nil
 }
 
 func requestURI(r *http.Request) string {
@@ -218,6 +234,31 @@ func (d *DefaultResolver) fetchHTTP(ctx context.Context, rawURL, host string) (i
 		}
 	}
 	return nil, "", lastErr
+}
+
+// headHTTP sends an HTTP HEAD request and returns the Content-Type header.
+// On 405 Method Not Allowed or any error, returns ("", nil) so the caller
+// can fall through to attempting a transform.
+func (d *DefaultResolver) headHTTP(ctx context.Context, rawURL, host string) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodHead, rawURL, nil)
+	if err != nil {
+		return "", nil
+	}
+	if host != "" {
+		req.Host = host
+	}
+	res, err := d.httpClient.Do(req)
+	if err != nil {
+		return "", nil
+	}
+	defer res.Body.Close()
+	if res.StatusCode == http.StatusMethodNotAllowed {
+		return "", nil
+	}
+	if res.StatusCode < http.StatusOK || res.StatusCode >= http.StatusMultipleChoices {
+		return "", nil
+	}
+	return res.Header.Get("Content-Type"), nil
 }
 
 func (d *DefaultResolver) doFetch(ctx context.Context, rawURL, host string) (io.ReadCloser, string, error) {
