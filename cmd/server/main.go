@@ -21,6 +21,7 @@ import (
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/upstream"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
@@ -58,7 +59,9 @@ func newReadyHandler(imgproxyURL string, readyClient *http.Client, s3ReadinessEn
 		}
 		resp.Body.Close()
 		if s3ReadinessEnabled {
-			if err := checker.Check(r.Context()); err != nil {
+			checkCtx, checkCancel := context.WithTimeout(r.Context(), 2*time.Second)
+			defer checkCancel()
+			if err := checker.Check(checkCtx); err != nil {
 				http.Error(w, "s3 not ready", http.StatusServiceUnavailable)
 				return
 			}
@@ -97,7 +100,10 @@ func main() {
 		slog.Warn("ALLOWED_SOURCE_BUCKETS is not set; any S3 source bucket is permitted (set ALLOW_ALL_SOURCE_BUCKETS=true to suppress startup error)")
 	}
 
-	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background(), awsconfig.WithRegion(cfg.CacheS3Region))
+	awsCfg, err := awsconfig.LoadDefaultConfig(context.Background(),
+		awsconfig.WithRegion(cfg.CacheS3Region),
+		awsconfig.WithRetryMode(aws.RetryModeAdaptive),
+	)
 	if err != nil {
 		slog.Error("load aws config", "error", err)
 		os.Exit(1)
@@ -153,6 +159,9 @@ func main() {
 		slog.Error("shutdown error", "error", err)
 	}
 
-	asyncCache.Wait()
-	slog.Info("async cache drained")
+	if err := asyncCache.WaitContext(shutdownCtx); err != nil {
+		slog.Warn("async cache drain interrupted by shutdown timeout", "error", err)
+	} else {
+		slog.Info("async cache drained")
+	}
 }
