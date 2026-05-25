@@ -1,12 +1,12 @@
 package handler
 
 import (
-	"bytes"
 	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/cache"
@@ -18,7 +18,7 @@ import (
 
 // Handler is the main image optimization HTTP handler.
 type Handler struct {
-	Cache        cache.Cache
+	Cache        cache.FileCache
 	Transformer  imgproxy.Transformer
 	Resolver     upstream.Resolver
 	Coalescer    coalesce.Coalescer
@@ -27,13 +27,14 @@ type Handler struct {
 }
 
 type processResult struct {
-	body        []byte
-	contentType string
-	cacheStatus string
+	body            []byte
+	contentType     string
+	cacheStatus     string
+	streamFromCache bool
 }
 
 // New creates a new Handler. maxBodyBytes limits upstream/transform body reads (0 = no limit).
-func New(c cache.Cache, t imgproxy.Transformer, r upstream.Resolver, coal coalesce.Coalescer, maxWidth int, maxBodyBytes int64) *Handler {
+func New(c cache.FileCache, t imgproxy.Transformer, r upstream.Resolver, coal coalesce.Coalescer, maxWidth int, maxBodyBytes int64) *Handler {
 	return &Handler{
 		Cache:        c,
 		Transformer:  t,
@@ -62,6 +63,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		Quality: params.Quality,
 	})
 
+	if body, contentType, err := h.Cache.Get(r.Context(), key); err == nil {
+		defer body.Close()
+		h.streamResponse(w, body, contentType, "HIT")
+		metrics.IncCacheHit()
+		return
+	} else if !errors.Is(err, cache.ErrNotFound) {
+		slog.Error("handler: cache get", "key", key, "error", err)
+	}
+
 	value, err, _ := h.Coalescer.Do(r.Context(), key, func() (interface{}, error) {
 		return h.process(r, key, params)
 	})
@@ -77,7 +87,29 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		h.writeError(w)
 		return
 	}
+
+	if result.streamFromCache {
+		body, contentType, err := h.Cache.Get(r.Context(), key)
+		if err != nil {
+			slog.Error("handler: cache get after fill", "key", key, "error", err)
+			h.writeError(w)
+			return
+		}
+		defer body.Close()
+		h.streamResponse(w, body, contentType, result.cacheStatus)
+		return
+	}
+
 	h.writeResult(w, result)
+}
+
+func (h *Handler) streamResponse(w http.ResponseWriter, body io.Reader, contentType, cacheStatus string) {
+	if contentType != "" {
+		w.Header().Set("Content-Type", contentType)
+	}
+	w.Header().Set("Cache-Control", "public, max-age=31536000")
+	w.Header().Set("X-Cache", cacheStatus)
+	_, _ = io.Copy(w, body)
 }
 
 func (h *Handler) passThrough(w http.ResponseWriter, r *http.Request) {
@@ -133,18 +165,6 @@ func (h *Handler) passThrough(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) process(r *http.Request, key string, params *ImageParams) (processResult, error) {
-	if body, contentType, err := h.Cache.Get(r.Context(), key); err == nil {
-		defer body.Close()
-		data, err := h.readBody(body)
-		if err != nil {
-			return processResult{}, err
-		}
-		metrics.IncCacheHit()
-		return processResult{body: data, contentType: contentType, cacheStatus: "HIT"}, nil
-	} else if !errors.Is(err, cache.ErrNotFound) {
-		slog.Error("handler: cache get", "key", key, "error", err)
-	}
-
 	sourceURL, headFunc, fetchFunc, err := h.Resolver.Resolve(r)
 	if err != nil {
 		return processResult{}, err
@@ -198,10 +218,6 @@ func (h *Handler) process(r *http.Request, key string, params *ImageParams) (pro
 	}
 	defer transformedBody.Close()
 
-	data, err := h.readBody(transformedBody)
-	if err != nil {
-		return processResult{}, err
-	}
 	if err := validateTransformedContentType(transformedContentType); err != nil {
 		slog.Error("handler: imgproxy returned invalid content type",
 			"error", err,
@@ -220,12 +236,41 @@ func (h *Handler) process(r *http.Request, key string, params *ImageParams) (pro
 		metrics.IncCacheMiss()
 		return processResult{body: originalData, contentType: originalContentType, cacheStatus: "MISS"}, nil
 	}
-	if err := h.Cache.Put(r.Context(), key, bytes.NewReader(data), transformedContentType); err != nil {
-		slog.Error("handler: cache put", "key", key, "error", err)
+
+	tmpFile, err := os.CreateTemp("", "image-optimize-proxy-*")
+	if err != nil {
+		return processResult{}, fmt.Errorf("handler: create temp file: %w", err)
+	}
+	tmpPath := tmpFile.Name()
+
+	var written int64
+	if h.MaxBodyBytes > 0 {
+		limited := io.LimitReader(transformedBody, h.MaxBodyBytes+1)
+		written, err = io.Copy(tmpFile, limited)
+	} else {
+		written, err = io.Copy(tmpFile, transformedBody)
+	}
+	if closeErr := tmpFile.Close(); err == nil {
+		err = closeErr
+	}
+
+	if err != nil {
+		_ = os.Remove(tmpPath)
+		return processResult{}, fmt.Errorf("handler: write temp file: %w", err)
+	}
+	if h.MaxBodyBytes > 0 && written > h.MaxBodyBytes {
+		_ = os.Remove(tmpPath)
+		return processResult{}, fmt.Errorf("handler: transformed body exceeds %d bytes", h.MaxBodyBytes)
+	}
+
+	if err := h.Cache.PutFile(r.Context(), key, tmpPath, transformedContentType); err != nil {
+		slog.Error("handler: cache put file", "key", key, "error", err)
+		_ = os.Remove(tmpPath)
+		return processResult{}, err
 	}
 
 	metrics.IncCacheMiss()
-	return processResult{body: data, contentType: transformedContentType, cacheStatus: "MISS"}, nil
+	return processResult{contentType: transformedContentType, cacheStatus: "MISS", streamFromCache: true}, nil
 }
 
 func (h *Handler) readBody(r io.Reader) ([]byte, error) {

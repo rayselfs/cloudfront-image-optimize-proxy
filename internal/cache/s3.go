@@ -20,6 +20,14 @@ type Cache interface {
 	Put(ctx context.Context, key string, body io.Reader, contentType string) error
 }
 
+// FileCache extends Cache with file-based put for efficient large-object uploads.
+// PutFile must complete synchronously so the object is readable from Cache.Get
+// immediately upon return — do not delegate PutFile to an async worker.
+type FileCache interface {
+	Cache
+	PutFile(ctx context.Context, key, filePath, contentType string) error
+}
+
 // ErrNotFound is returned when a cache key does not exist.
 var ErrNotFound = errors.New("cache: not found")
 

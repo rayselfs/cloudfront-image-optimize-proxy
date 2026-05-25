@@ -68,6 +68,17 @@ func (a *AsyncPutCache) Put(_ context.Context, key string, body io.Reader, conte
 	return nil
 }
 
+// PutFile delegates to the inner FileCache synchronously.
+// It does NOT use the async worker pool — callers block until the upload completes.
+// This ensures the object is readable via Cache.Get immediately after PutFile returns.
+func (a *AsyncPutCache) PutFile(ctx context.Context, key, filePath, contentType string) error {
+	fc, ok := a.inner.(FileCache)
+	if !ok {
+		return fmt.Errorf("async cache: inner cache does not support PutFile")
+	}
+	return fc.PutFile(ctx, key, filePath, contentType)
+}
+
 // Wait blocks until all in-flight Put goroutines complete.
 func (a *AsyncPutCache) Wait() {
 	a.wg.Wait()

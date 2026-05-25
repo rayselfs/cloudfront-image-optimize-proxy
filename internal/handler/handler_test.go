@@ -8,6 +8,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/cache"
@@ -24,6 +26,7 @@ type mockCache struct {
 	putBody        []byte
 	putContentType string
 	putErr         error
+	putFileCalls   int
 }
 
 func (m *mockCache) Get(ctx context.Context, key string) (io.ReadCloser, string, error) {
@@ -43,6 +46,22 @@ func (m *mockCache) Put(ctx context.Context, key string, body io.Reader, content
 		return err
 	}
 	m.putBody = data
+	return m.putErr
+}
+
+func (m *mockCache) PutFile(ctx context.Context, key, filePath, contentType string) error {
+	m.putFileCalls++
+	m.putKey = key
+	m.putContentType = contentType
+	data, err := os.ReadFile(filePath)
+	if err != nil {
+		return err
+	}
+	m.putBody = data
+	m.getBody = data
+	m.getContentType = contentType
+	m.getErr = nil
+	_ = os.Remove(filePath)
 	return m.putErr
 }
 
@@ -219,8 +238,8 @@ func TestCacheHit(t *testing.T) {
 	if got := w.Header().Get("X-Cache"); got != "HIT" {
 		t.Fatalf("X-Cache = %q, want HIT", got)
 	}
-	if got := coal.key; got != "example.com/image.png/640_webp_80" {
-		t.Fatalf("coalescer key = %q", got)
+	if coal.calls != 0 {
+		t.Fatalf("coalescer calls = %d, want 0 (cache HIT bypasses coalescer)", coal.calls)
 	}
 	if r.calls != 0 || tx.calls != 0 || c.putCalls != 0 {
 		t.Fatalf("unexpected calls resolver=%d transform=%d put=%d", r.calls, tx.calls, c.putCalls)
@@ -245,8 +264,11 @@ func TestCacheMissTransform(t *testing.T) {
 	if got := w.Header().Get("X-Cache"); got != "MISS" {
 		t.Fatalf("X-Cache = %q, want MISS", got)
 	}
-	if c.putCalls != 1 || c.putKey != "example.com/image.png/640_avif_80" || !bytes.Equal(c.putBody, []byte("transformed")) {
-		t.Fatalf("cache put calls=%d key=%q body=%q", c.putCalls, c.putKey, c.putBody)
+	if c.putFileCalls != 1 || c.putKey != "example.com/image.png/640_avif_80" {
+		t.Fatalf("cache putFile calls=%d key=%q", c.putFileCalls, c.putKey)
+	}
+	if c.putCalls != 0 {
+		t.Fatalf("async Put calls=%d, want 0 (transform path uses PutFile)", c.putCalls)
 	}
 	if tx.calls != 1 || tx.sourceURL != "https://origin/image.png" {
 		t.Fatalf("transform calls=%d source=%q", tx.calls, tx.sourceURL)
@@ -279,6 +301,12 @@ func TestCacheMissTransformNoFetch(t *testing.T) {
 	}
 	if r.headCalls != 1 {
 		t.Fatalf("headCalls = %d, want 1", r.headCalls)
+	}
+	if c.putFileCalls != 1 {
+		t.Fatalf("putFileCalls = %d, want 1", c.putFileCalls)
+	}
+	if c.putCalls != 0 {
+		t.Fatalf("putCalls = %d, want 0", c.putCalls)
 	}
 }
 
@@ -420,8 +448,7 @@ func TestProcessFetchError(t *testing.T) {
 	}
 }
 
-func TestCachePutError(t *testing.T) {
-	// cache.Put error is non-fatal; the response should still be served.
+func TestCachePutFileError(t *testing.T) {
 	c := &mockCache{getErr: cache.ErrNotFound, putErr: errors.New("s3 write error")}
 	tx := &mockTransformer{body: []byte("transformed"), contentType: "image/webp"}
 	r := &mockResolver{sourceURL: "https://origin/image.png", body: []byte("original"), contentType: "image/png"}
@@ -433,12 +460,14 @@ func TestCachePutError(t *testing.T) {
 
 	h.ServeHTTP(w, req)
 
-	// Still returns the transformed content despite cache.Put failing.
-	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200 (cache put error is non-fatal)", w.Code)
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 (cache PutFile error is fatal)", w.Code)
 	}
-	if got := w.Body.String(); got != "transformed" {
-		t.Fatalf("body = %q, want transformed", got)
+	if c.putFileCalls != 1 {
+		t.Fatalf("putFileCalls = %d, want 1", c.putFileCalls)
+	}
+	if c.putCalls != 0 {
+		t.Fatalf("putCalls = %d, want 0", c.putCalls)
 	}
 }
 
@@ -562,5 +591,53 @@ func TestCacheGetNonMissError(t *testing.T) {
 	}
 	if got := w.Body.String(); got != "transformed" {
 		t.Fatalf("body = %q, want transformed", got)
+	}
+}
+
+func TestTempFileRemovedOnSuccess(t *testing.T) {
+	before, _ := filepath.Glob(os.TempDir() + "/image-optimize-proxy-*")
+
+	c := &mockCache{getErr: cache.ErrNotFound}
+	tx := &mockTransformer{body: bytes.Repeat([]byte("x"), 1024), contentType: "image/avif"}
+	r := &mockResolver{sourceURL: "https://origin/img.png", contentType: "image/avif", headContentType: "image/avif"}
+	coal := &mockCoalescer{}
+	h := New(c, tx, r, coal, 1920, 10*1024*1024)
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/img.png?imwidth=640&f=avif&q=80", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+
+	after, _ := filepath.Glob(os.TempDir() + "/image-optimize-proxy-*")
+	newFiles := len(after) - len(before)
+	if newFiles != 0 {
+		t.Fatalf("temp files leaked: %d new file(s) found", newFiles)
+	}
+}
+
+func TestTempFileRemovedOnOverLimit(t *testing.T) {
+	before, _ := filepath.Glob(os.TempDir() + "/image-optimize-proxy-*")
+
+	c := &mockCache{getErr: cache.ErrNotFound}
+	tx := &mockTransformer{body: bytes.Repeat([]byte("x"), 20), contentType: "image/avif"}
+	r := &mockResolver{sourceURL: "https://origin/img.png", contentType: "image/avif", headContentType: "image/avif"}
+	coal := &mockCoalescer{}
+	h := New(c, tx, r, coal, 1920, 5)
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/img.png?imwidth=640&f=avif&q=80", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want 502 (over limit)", w.Code)
+	}
+
+	after, _ := filepath.Glob(os.TempDir() + "/image-optimize-proxy-*")
+	newFiles := len(after) - len(before)
+	if newFiles != 0 {
+		t.Fatalf("temp files leaked: %d new file(s) found", newFiles)
 	}
 }
