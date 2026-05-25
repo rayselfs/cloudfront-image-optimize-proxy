@@ -57,17 +57,8 @@ func TestWrapAsyncPutDelegatesData(t *testing.T) {
 	data := []byte("hello-image")
 	_ = wrapped.Put(context.Background(), "mykey", bytes.NewReader(data), "image/avif")
 
-	// Wait for goroutine to complete.
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		inner.mu.Lock()
-		calls := inner.calls
-		inner.mu.Unlock()
-		if calls > 0 {
-			break
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
+	// Wait for goroutine to complete via Wait().
+	wrapped.Wait()
 
 	inner.mu.Lock()
 	defer inner.mu.Unlock()
@@ -92,5 +83,26 @@ func TestWrapAsyncPutGetPassThrough(t *testing.T) {
 	_, _, err := wrapped.Get(context.Background(), "key")
 	if err != ErrNotFound {
 		t.Errorf("Get err = %v, want ErrNotFound", err)
+	}
+}
+
+func TestWrapAsyncPutWait(t *testing.T) {
+	inner := &syncCache{}
+	wrapped := WrapAsyncPut(inner, 5*time.Second)
+
+	const n = 5
+	for i := 0; i < n; i++ {
+		_ = wrapped.Put(context.Background(), "key", bytes.NewReader([]byte("data")), "image/webp")
+	}
+
+	// Wait must block until all goroutines complete.
+	wrapped.Wait()
+
+	inner.mu.Lock()
+	calls := inner.calls
+	inner.mu.Unlock()
+
+	if calls != n {
+		t.Errorf("inner.Put calls after Wait = %d, want %d", calls, n)
 	}
 }

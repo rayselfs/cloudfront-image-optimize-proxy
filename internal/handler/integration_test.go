@@ -98,9 +98,10 @@ func TestIntegrationImageOptimizationFlow(t *testing.T) {
 	h := New(
 		s3Cache,
 		imgproxy.NewClient(imgproxyServer.URL, 30*time.Second),
-		upstream.NewResolver(30*time.Second, nil),
+		upstream.NewResolver(30*time.Second, nil, nil),
 		coalesce.New(),
 		1920,
+		0,
 	)
 
 	assertRequest(t, h, "https://assets.example.com/images/hero.png?imwidth=640&f=webp&q=75", upstreamServer.URL, transformedImage, "image/webp", "MISS")
