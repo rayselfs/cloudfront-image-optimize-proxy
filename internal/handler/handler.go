@@ -162,7 +162,9 @@ func (h *Handler) passThrough(w http.ResponseWriter, r *http.Request) {
 		if contentType != "" {
 			w.Header().Set("Content-Type", contentType)
 		}
-		if _, err := io.Copy(w, body); err != nil {
+		bufPtr := copyBufPool.Get().(*[]byte)
+		defer copyBufPool.Put(bufPtr)
+		if _, err := io.CopyBuffer(w, body, *bufPtr); err != nil {
 			slog.Error("handler: write pass-through", "error", err)
 		}
 		return
