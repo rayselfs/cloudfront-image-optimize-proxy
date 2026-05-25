@@ -123,7 +123,9 @@ func (h *Handler) streamResponse(w http.ResponseWriter, body io.Reader, contentT
 	if h.MaxBodyBytes > 0 {
 		r = io.LimitReader(body, h.MaxBodyBytes)
 	}
-	_, _ = io.Copy(w, r)
+	bufPtr := copyBufPool.Get().(*[]byte)
+	defer copyBufPool.Put(bufPtr)
+	_, _ = io.CopyBuffer(w, r, *bufPtr)
 }
 
 func cacheKeyHash(key string) string {
