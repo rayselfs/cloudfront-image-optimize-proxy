@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"crypto/sha256"
 	"crypto/subtle"
 	"log/slog"
 	"net/http"
@@ -21,9 +22,10 @@ func CloudFrontVerify(secrets []string) func(http.Handler) http.Handler {
 				return
 			}
 
-			token := []byte(r.Header.Get("X-Origin-Verify"))
+			tokenHash := sha256.Sum256([]byte(r.Header.Get("X-Origin-Verify")))
 			for _, s := range secrets {
-				if subtle.ConstantTimeCompare(token, []byte(s)) == 1 {
+				secretHash := sha256.Sum256([]byte(s))
+				if subtle.ConstantTimeCompare(tokenHash[:], secretHash[:]) == 1 {
 					next.ServeHTTP(w, r)
 					return
 				}
@@ -31,7 +33,6 @@ func CloudFrontVerify(secrets []string) func(http.Handler) http.Handler {
 
 			slog.Warn("origin verify: unauthorized access attempt",
 				"remote_addr", r.RemoteAddr,
-				"x_forwarded_for", r.Header.Get("X-Forwarded-For"),
 				"path", r.URL.Path,
 				"method", r.Method,
 			)

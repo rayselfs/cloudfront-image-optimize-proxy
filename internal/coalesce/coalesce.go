@@ -1,10 +1,14 @@
 package coalesce
 
-import "golang.org/x/sync/singleflight"
+import (
+	"context"
+
+	"golang.org/x/sync/singleflight"
+)
 
 // Coalescer deduplicates concurrent requests for the same resource.
 type Coalescer interface {
-	Do(key string, fn func() (interface{}, error)) (interface{}, error, bool)
+	Do(ctx context.Context, key string, fn func() (interface{}, error)) (interface{}, error, bool)
 }
 
 // SingleFlight implements Coalescer using golang.org/x/sync/singleflight.
@@ -18,11 +22,16 @@ func New() *SingleFlight {
 }
 
 // Do executes fn for the given key, deduplicating concurrent calls.
-// Returns (value, error, shared) where shared=true means the result was
-// shared with another concurrent caller.
-func (s *SingleFlight) Do(key string, fn func() (interface{}, error)) (interface{}, error, bool) {
-	val, err, shared := s.group.Do(key, func() (interface{}, error) {
+// If ctx is cancelled before the result is ready, Do returns immediately with ctx.Err().
+// The underlying fn continues running so the result can be shared with other callers.
+func (s *SingleFlight) Do(ctx context.Context, key string, fn func() (interface{}, error)) (interface{}, error, bool) {
+	ch := s.group.DoChan(key, func() (interface{}, error) {
 		return fn()
 	})
-	return val, err, shared
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err(), false
+	case result := <-ch:
+		return result.Val, result.Err, result.Shared
+	}
 }

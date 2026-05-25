@@ -22,6 +22,16 @@ func IncCacheBypass()   { cacheBypasses.Add(1) }
 func IncImgproxyError() { imgproxyErrors.Add(1) }
 func IncPutError()      { putErrors.Add(1) }
 
+// Reset zeroes all counters. Intended for use in tests only.
+func Reset() {
+	requestsTotal.Store(0)
+	cacheHits.Store(0)
+	cacheMisses.Store(0)
+	cacheBypasses.Store(0)
+	imgproxyErrors.Store(0)
+	putErrors.Store(0)
+}
+
 func Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")

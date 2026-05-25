@@ -16,15 +16,6 @@ func Logging(next http.Handler) http.Handler {
 
 		next.ServeHTTP(wrapped, r)
 
-		xCache := wrapped.Header().Get("X-Cache")
-		switch xCache {
-		case "HIT":
-			metrics.IncCacheHit()
-		case "MISS":
-			metrics.IncCacheMiss()
-		case "BYPASS":
-			metrics.IncCacheBypass()
-		}
 		metrics.IncRequest()
 
 		slog.Info("request completed",
@@ -32,7 +23,7 @@ func Logging(next http.Handler) http.Handler {
 			"path", r.URL.Path,
 			"status", wrapped.statusCode,
 			"duration_ms", time.Since(start).Milliseconds(),
-			"x_cache", xCache,
+			"x_cache", wrapped.Header().Get("X-Cache"),
 			"bytes_written", wrapped.bytesWritten,
 			"remote_addr", r.RemoteAddr,
 		)

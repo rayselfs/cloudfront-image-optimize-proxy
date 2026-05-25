@@ -2,6 +2,7 @@ package upstream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -33,22 +34,34 @@ var newS3Presigner = func(ctx context.Context) (s3Presigner, error) {
 	return s3.NewPresignClient(s3.NewFromConfig(cfg)), nil
 }
 
+type upstreamStatusError struct {
+	Code int
+}
+
+func (e *upstreamStatusError) Error() string {
+	return fmt.Sprintf("upstream returned status %d", e.Code)
+}
+
+func (e *upstreamStatusError) retryable() bool {
+	return e.Code >= 500
+}
+
 // DefaultResolver resolves image sources from either S3 or the upstream gateway.
 type DefaultResolver struct {
-	httpClient      *http.Client
-	allowedGateways []string
-	// presigner is initialized once via presignerOnce to avoid calling
-	// awsconfig.LoadDefaultConfig on every S3 request.
-	presignerOnce sync.Once
-	presigner     s3Presigner
-	presignerErr  error
+	httpClient           *http.Client
+	allowedGateways      []string
+	allowedSourceBuckets []string
+	presignerOnce        sync.Once
+	presigner            s3Presigner
+	presignerErr         error
 }
 
 // NewResolver creates the default upstream resolver with the given HTTP timeout.
-func NewResolver(timeout time.Duration, allowedGateways []string) *DefaultResolver {
+func NewResolver(timeout time.Duration, allowedGateways []string, allowedSourceBuckets []string) *DefaultResolver {
 	return &DefaultResolver{
-		httpClient:      &http.Client{Timeout: timeout},
-		allowedGateways: allowedGateways,
+		httpClient:           &http.Client{Timeout: timeout},
+		allowedGateways:      allowedGateways,
+		allowedSourceBuckets: allowedSourceBuckets,
 	}
 }
 
@@ -98,9 +111,21 @@ func (d *DefaultResolver) resolveS3(r *http.Request) (string, func() (io.ReadClo
 		return "", nil, fmt.Errorf("X-Img-Source-Bucket is required for s3 source")
 	}
 
-	// Initialize the presigner once per resolver instance.
+	if len(d.allowedSourceBuckets) > 0 {
+		allowed := false
+		for _, b := range d.allowedSourceBuckets {
+			if bucket == b {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return "", nil, fmt.Errorf("source bucket %q not in allowlist", bucket)
+		}
+	}
+
 	d.presignerOnce.Do(func() {
-		d.presigner, d.presignerErr = newS3Presigner(r.Context())
+		d.presigner, d.presignerErr = newS3Presigner(context.Background())
 	})
 	if d.presignerErr != nil {
 		return "", nil, d.presignerErr
@@ -130,8 +155,39 @@ func requestURI(r *http.Request) string {
 	return uri
 }
 
-func (d *DefaultResolver) fetchHTTP(ctx context.Context, url, host string) (io.ReadCloser, string, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+func (d *DefaultResolver) fetchHTTP(ctx context.Context, rawURL, host string) (io.ReadCloser, string, error) {
+	const maxAttempts = 3
+	var lastErr error
+
+	for attempt := range maxAttempts {
+		if attempt > 0 {
+			delay := time.Duration(100<<(attempt-1)) * time.Millisecond
+			select {
+			case <-ctx.Done():
+				return nil, "", ctx.Err()
+			case <-time.After(delay):
+			}
+		}
+
+		rc, ct, err := d.doFetch(ctx, rawURL, host)
+		if err == nil {
+			return rc, ct, nil
+		}
+		lastErr = err
+
+		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return nil, "", err
+		}
+		var statusErr *upstreamStatusError
+		if errors.As(err, &statusErr) && !statusErr.retryable() {
+			return nil, "", err
+		}
+	}
+	return nil, "", lastErr
+}
+
+func (d *DefaultResolver) doFetch(ctx context.Context, rawURL, host string) (io.ReadCloser, string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, "", err
 	}
@@ -145,7 +201,7 @@ func (d *DefaultResolver) fetchHTTP(ctx context.Context, url, host string) (io.R
 	}
 	if res.StatusCode < http.StatusOK || res.StatusCode >= http.StatusMultipleChoices {
 		res.Body.Close()
-		return nil, "", fmt.Errorf("upstream returned status %d", res.StatusCode)
+		return nil, "", &upstreamStatusError{Code: res.StatusCode}
 	}
 
 	return res.Body, res.Header.Get("Content-Type"), nil
