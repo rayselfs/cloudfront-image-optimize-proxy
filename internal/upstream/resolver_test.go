@@ -2,6 +2,7 @@ package upstream
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -296,5 +297,65 @@ func TestFetchHTTPNoRetryOn4xx(t *testing.T) {
 	}
 	if calls.Load() != 1 {
 		t.Errorf("server calls = %d, want 1 (no retry on 4xx)", calls.Load())
+	}
+}
+
+func TestNewResolverWithTransport(t *testing.T) {
+	d := NewResolverWithTransport(5*time.Second, nil, nil, nil)
+	if d.httpClient.Timeout != 5*time.Second {
+		t.Fatalf("timeout = %v, want 5s", d.httpClient.Timeout)
+	}
+	if d.httpClient.Transport != nil {
+		t.Fatalf("expected nil transport (uses default), got %T", d.httpClient.Transport)
+	}
+
+	tr := &http.Transport{}
+	d2 := NewResolverWithTransport(5*time.Second, nil, nil, tr)
+	if d2.httpClient.Transport != tr {
+		t.Fatalf("transport not wired through")
+	}
+}
+
+func TestNewResolverWithEagerPresigner_MockPresigner(t *testing.T) {
+	origFactory := newS3Presigner
+	defer func() { newS3Presigner = origFactory }()
+
+	mock := mockPresigner{t: t, bucket: "b", key: "k", response: "https://s3.example.com/presigned"}
+	newS3Presigner = func(ctx context.Context) (s3Presigner, error) {
+		return mock, nil
+	}
+
+	r, err := NewResolverWithEagerPresigner(
+		context.Background(),
+		5*time.Second,
+		[]string{"gateway.example.com"},
+		[]string{"source-bucket"},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if r.presigner != mock {
+		t.Fatal("presigner not injected at construction")
+	}
+}
+
+func TestNewResolverWithEagerPresigner_InitError(t *testing.T) {
+	origFactory := newS3Presigner
+	defer func() { newS3Presigner = origFactory }()
+
+	newS3Presigner = func(ctx context.Context) (s3Presigner, error) {
+		return nil, fmt.Errorf("aws init failed")
+	}
+
+	_, err := NewResolverWithEagerPresigner(
+		context.Background(),
+		5*time.Second,
+		nil,
+		nil,
+		nil,
+	)
+	if err == nil {
+		t.Fatal("expected error, got nil")
 	}
 }

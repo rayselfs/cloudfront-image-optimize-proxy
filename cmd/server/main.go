@@ -65,7 +65,11 @@ func main() {
 	asyncCache := cache.WrapAsyncPut(s3Cache, cfg.AsyncCachePutTimeout, cfg.AsyncCachePutConcurrency)
 	sharedTransport := httpclient.NewTransport()
 	imgproxyClient := imgproxy.NewClientWithTransport(cfg.ImgproxyURL, cfg.ImgproxyTimeout, sharedTransport)
-	resolver := upstream.NewResolverWithTransport(cfg.UpstreamTimeout, cfg.AllowedUpstreamGateways, cfg.AllowedSourceBuckets, sharedTransport)
+	resolver, err := upstream.NewResolverWithEagerPresigner(context.Background(), cfg.UpstreamTimeout, cfg.AllowedUpstreamGateways, cfg.AllowedSourceBuckets, sharedTransport)
+	if err != nil {
+		slog.Error("init upstream resolver", "error", err)
+		os.Exit(1)
+	}
 	coalescer := coalesce.New()
 	imageHandler := handler.New(asyncCache, imgproxyClient, resolver, coalescer, cfg.MaxWidth, cfg.MaxBodyBytes)
 

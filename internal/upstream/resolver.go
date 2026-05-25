@@ -78,6 +78,25 @@ func NewResolverWithTransport(timeout time.Duration, allowedGateways []string, a
 	}
 }
 
+// NewResolverWithEagerPresigner creates a DefaultResolver that initializes the
+// S3 presigner at construction time. Returns an error if presigner init fails,
+// enabling fail-fast at startup. transport may be nil (uses default).
+func NewResolverWithEagerPresigner(ctx context.Context, timeout time.Duration, allowedGateways []string, allowedSourceBuckets []string, transport http.RoundTripper) (*DefaultResolver, error) {
+	p, err := newS3Presigner(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("upstream: init S3 presigner: %w", err)
+	}
+	return &DefaultResolver{
+		httpClient: &http.Client{
+			Timeout:   timeout,
+			Transport: transport,
+		},
+		allowedGateways:      allowedGateways,
+		allowedSourceBuckets: allowedSourceBuckets,
+		presigner:            p,
+	}, nil
+}
+
 // Resolve returns the source URL that imgproxy should read and a fallback fetch function.
 func (d *DefaultResolver) Resolve(r *http.Request) (string, func() (io.ReadCloser, string, error), error) {
 	if r.Header.Get("X-Img-Source-Type") == "s3" {
@@ -137,11 +156,13 @@ func (d *DefaultResolver) resolveS3(r *http.Request) (string, func() (io.ReadClo
 		}
 	}
 
-	d.presignerOnce.Do(func() {
-		d.presigner, d.presignerErr = newS3Presigner(context.Background())
-	})
-	if d.presignerErr != nil {
-		return "", nil, d.presignerErr
+	if d.presigner == nil {
+		d.presignerOnce.Do(func() {
+			d.presigner, d.presignerErr = newS3Presigner(context.Background())
+		})
+		if d.presignerErr != nil {
+			return "", nil, d.presignerErr
+		}
 	}
 
 	presigned, err := d.presigner.PresignGetObject(r.Context(), &s3.GetObjectInput{
