@@ -2,6 +2,7 @@ package config
 
 import (
 	"fmt"
+	"net/url"
 	"os"
 	"strconv"
 	"strings"
@@ -196,7 +197,8 @@ func loadBool(name string) bool {
 	return strings.ToLower(strings.TrimSpace(os.Getenv(name))) == "true"
 }
 
-// Validate checks that allowlists are configured or explicitly opted out.
+// Validate checks that allowlists are configured or explicitly opted out,
+// and validates ImgproxyURL is a valid HTTP URL.
 func (c *Config) Validate() error {
 	if len(c.AllowedUpstreamGateways) == 0 && !c.AllowAllUpstreamGateways {
 		return fmt.Errorf("ALLOWED_UPSTREAM_GATEWAYS is empty; set it or set ALLOW_ALL_UPSTREAM_GATEWAYS=true to permit all")
@@ -204,5 +206,10 @@ func (c *Config) Validate() error {
 	if len(c.AllowedSourceBuckets) == 0 && !c.AllowAllSourceBuckets {
 		return fmt.Errorf("ALLOWED_SOURCE_BUCKETS is empty; set it or set ALLOW_ALL_SOURCE_BUCKETS=true to permit all")
 	}
+
+	if _, err := url.ParseRequestURI(c.ImgproxyURL); err != nil || !strings.HasPrefix(c.ImgproxyURL, "http") {
+		return fmt.Errorf("IMGPROXY_URL %q is not a valid HTTP URL", c.ImgproxyURL)
+	}
+
 	return nil
 }

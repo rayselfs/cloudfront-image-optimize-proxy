@@ -9,13 +9,13 @@ import (
 )
 
 // CorrelationID is a middleware that reads or generates a request correlation ID.
-// It reads X-Request-Id from the incoming request; if absent, generates a random
+// It reads X-Request-Id from the incoming request; if absent or invalid, generates a random
 // 16-byte hex string. The ID is stored in the request context, set on the response
 // header, and available via requestid.FromContext.
 func CorrelationID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := r.Header.Get("X-Request-Id")
-		if id == "" {
+		if id == "" || !isValidRequestID(id) {
 			id = generateID()
 		}
 
@@ -35,3 +35,19 @@ func generateID() string {
 	}
 	return hex.EncodeToString(b)
 }
+
+// isValidRequestID checks if the request ID is valid:
+// - max length 128 chars
+// - only alphanumeric, hyphens, underscores
+func isValidRequestID(id string) bool {
+	if len(id) == 0 || len(id) > 128 {
+		return false
+	}
+	for _, c := range id {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+			return false
+		}
+	}
+	return true
+}
+

@@ -382,3 +382,35 @@ func TestLoadValidSettings(t *testing.T) {
 		})
 	}
 }
+
+func TestInvalidImgproxyURL(t *testing.T) {
+	tests := []struct {
+		name         string
+		imgproxyURL  string
+		shouldFail   bool
+	}{
+		{"valid http", "http://localhost:8081", false},
+		{"valid https", "https://imgproxy.example.com", false},
+		{"invalid ftp scheme", "ftp://host", true},
+		{"invalid no scheme", "localhost:8081", true},
+		{"invalid malformed", "not-a-url", true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CACHE_S3_BUCKET", "test-bucket")
+			t.Setenv("ALLOW_ALL_UPSTREAM_GATEWAYS", "true")
+			t.Setenv("ALLOW_ALL_SOURCE_BUCKETS", "true")
+			t.Setenv("IMGPROXY_URL", tc.imgproxyURL)
+
+			_, err := Load()
+			if tc.shouldFail && err == nil {
+				t.Fatalf("Load() error = nil, want error for IMGPROXY_URL=%q", tc.imgproxyURL)
+			}
+			if !tc.shouldFail && err != nil {
+				t.Fatalf("Load() error = %v, want nil for IMGPROXY_URL=%q", err, tc.imgproxyURL)
+			}
+		})
+	}
+}
+

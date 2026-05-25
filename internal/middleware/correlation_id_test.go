@@ -54,3 +54,29 @@ func TestCorrelationIDGenerated(t *testing.T) {
 		t.Errorf("context ID %q != response header ID %q", gotCtxID, respID)
 	}
 }
+
+func TestCorrelationIDInvalidIDRejected(t *testing.T) {
+	var gotCtxID string
+	handler := CorrelationID(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotCtxID = requestid.FromContext(r.Context())
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	req.Header.Set("X-Request-Id", "../../../../etc/passwd")
+	rr := httptest.NewRecorder()
+
+	handler.ServeHTTP(rr, req)
+
+	respID := rr.Header().Get("X-Request-Id")
+	if respID == "../../../../etc/passwd" {
+		t.Error("invalid X-Request-Id was not rejected; got same value back")
+	}
+	if len(respID) != 32 {
+		t.Errorf("generated X-Request-Id length = %d, want 32 (16-byte hex); got %q", len(respID), respID)
+	}
+	if gotCtxID != respID {
+		t.Errorf("context ID %q != response header ID %q", gotCtxID, respID)
+	}
+}
+

@@ -56,17 +56,18 @@ tolerations: []
 # Merged with the HA-generated podAntiAffinity when ha.enabled is true.
 affinity: {}
 
-podSecurityContext: {}
-  # runAsNonRoot: true
-  # runAsUser: 1000
-  # fsGroup: 1000
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  fsGroup: 65534
 
 # securityContext for the proxy container.
-securityContext: {}
-  # allowPrivilegeEscalation: false
-  # capabilities:
-  #   drop: [ALL]
-  # readOnlyRootFilesystem: true
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false  # false because handler writes temp files to /tmp
+  capabilities:
+    drop:
+      - ALL
 
 revisionHistoryLimit: 1
 
