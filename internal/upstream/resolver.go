@@ -41,15 +41,17 @@ var newS3Presigner = func(ctx context.Context) (s3Presigner, error) {
 	return s3.NewPresignClient(s3.NewFromConfig(cfg)), nil
 }
 
-type upstreamStatusError struct {
+// StatusError represents an HTTP error status returned by the upstream source.
+type StatusError struct {
 	Code int
 }
 
-func (e *upstreamStatusError) Error() string {
+func (e *StatusError) Error() string {
 	return fmt.Sprintf("upstream returned status %d", e.Code)
 }
 
-func (e *upstreamStatusError) retryable() bool {
+// Retryable returns true if the status code represents a temporary server error (5xx).
+func (e *StatusError) Retryable() bool {
 	return e.Code >= 500
 }
 
@@ -249,8 +251,8 @@ func (d *DefaultResolver) fetchHTTP(ctx context.Context, rawURL, host string) (i
 		if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, "", err
 		}
-		var statusErr *upstreamStatusError
-		if errors.As(err, &statusErr) && !statusErr.retryable() {
+		var statusErr *StatusError
+		if errors.As(err, &statusErr) && !statusErr.Retryable() {
 			return nil, "", err
 		}
 	}
@@ -310,7 +312,7 @@ func (d *DefaultResolver) doFetch(ctx context.Context, rawURL, host string) (io.
 	}
 	if res.StatusCode < http.StatusOK || res.StatusCode >= http.StatusMultipleChoices {
 		res.Body.Close()
-		err := &upstreamStatusError{Code: res.StatusCode}
+		err := &StatusError{Code: res.StatusCode}
 		span.SetStatus(codes.Error, fmt.Sprintf("unexpected status %d", res.StatusCode))
 		span.RecordError(err)
 		return nil, "", err

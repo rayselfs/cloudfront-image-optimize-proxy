@@ -78,14 +78,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	})
 	if err != nil {
 		slog.Error("handler: process request", "error", err)
-		h.writeError(w)
+		h.writeError(w, err)
 		return
 	}
 
 	result, ok := value.(processResult)
 	if !ok {
 		slog.Error("handler: unexpected coalescer result type", "type", fmt.Sprintf("%T", value))
-		h.writeError(w)
+		h.writeError(w, fmt.Errorf("unexpected coalescer result type: %T", value))
 		return
 	}
 
@@ -93,7 +93,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		body, contentType, err := h.Cache.Get(r.Context(), key)
 		if err != nil {
 			slog.Error("handler: cache get after fill", "key_hash", cacheKeyHash(key), "error", err)
-			h.writeError(w)
+			h.writeError(w, err)
 			return
 		}
 		defer body.Close()
@@ -126,14 +126,14 @@ func (h *Handler) passThrough(w http.ResponseWriter, r *http.Request) {
 	_, _, fetchFunc, err := h.Resolver.Resolve(r)
 	if err != nil {
 		slog.Error("handler: resolve pass-through", "error", err)
-		h.writeError(w)
+		h.writeError(w, err)
 		return
 	}
 
 	body, contentType, err := fetchFunc()
 	if err != nil {
 		slog.Error("handler: fetch pass-through", "error", err)
-		h.writeError(w)
+		h.writeError(w, err)
 		return
 	}
 	defer body.Close()
@@ -142,7 +142,7 @@ func (h *Handler) passThrough(w http.ResponseWriter, r *http.Request) {
 	if contentType != "" {
 		if err := validatePassThroughContentType(contentType); err != nil {
 			slog.Error("handler: invalid pass-through content type", "error", err)
-			h.writeError(w)
+			h.writeError(w, err)
 			return
 		}
 	}
@@ -161,7 +161,7 @@ func (h *Handler) passThrough(w http.ResponseWriter, r *http.Request) {
 	buf, err := io.ReadAll(limited)
 	if err != nil {
 		slog.Error("handler: read pass-through body", "error", err)
-		h.writeError(w)
+		h.writeError(w, err)
 		return
 	}
 	if int64(len(buf)) > h.MaxBodyBytes {
@@ -307,6 +307,13 @@ func (h *Handler) writeResult(w http.ResponseWriter, result processResult) {
 	_, _ = w.Write(result.body)
 }
 
-func (h *Handler) writeError(w http.ResponseWriter) {
+func (h *Handler) writeError(w http.ResponseWriter, err error) {
+	var statusErr *upstream.StatusError
+	if errors.As(err, &statusErr) {
+		if statusErr.Code >= 400 && statusErr.Code < 500 {
+			http.Error(w, http.StatusText(statusErr.Code), statusErr.Code)
+			return
+		}
+	}
 	http.Error(w, http.StatusText(http.StatusBadGateway), http.StatusBadGateway)
 }

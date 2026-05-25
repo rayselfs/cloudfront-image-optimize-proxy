@@ -14,6 +14,7 @@ import (
 
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/cache"
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/imgproxy"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/upstream"
 )
 
 type mockCache struct {
@@ -647,5 +648,39 @@ func TestTempFileRemovedOnOverLimit(t *testing.T) {
 	newFiles := len(after) - len(before)
 	if newFiles != 0 {
 		t.Fatalf("temp files leaked: %d new file(s) found", newFiles)
+	}
+}
+
+func TestStatusForwarding(t *testing.T) {
+	c := &mockCache{getErr: cache.ErrNotFound}
+	tx := &mockTransformer{}
+	r := &mockResolver{
+		err: &upstream.StatusError{Code: http.StatusNotFound},
+	}
+	coal := &mockCoalescer{}
+	h := New(c, tx, r, coal, 1920, 0)
+
+	req := httptest.NewRequest(http.MethodGet, "https://example.com/image.png?imwidth=640&f=webp&q=80", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusNotFound)
+	}
+
+	// Test 403
+	r.err = &upstream.StatusError{Code: http.StatusForbidden}
+	w2 := httptest.NewRecorder()
+	h.ServeHTTP(w2, req)
+	if w2.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want %d", w2.Code, http.StatusForbidden)
+	}
+
+	// Test 500 (maps to 502)
+	r.err = &upstream.StatusError{Code: http.StatusInternalServerError}
+	w3 := httptest.NewRecorder()
+	h.ServeHTTP(w3, req)
+	if w3.Code != http.StatusBadGateway {
+		t.Fatalf("status = %d, want %d", w3.Code, http.StatusBadGateway)
 	}
 }
