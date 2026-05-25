@@ -86,3 +86,19 @@ func (a *AsyncPutCache) PutFile(ctx context.Context, key, filePath, contentType 
 func (a *AsyncPutCache) Wait() {
 	a.wg.Wait()
 }
+
+// WaitContext blocks until all in-flight Put goroutines complete or ctx is cancelled.
+// Returns ctx.Err() if the context expires before all goroutines finish.
+func (a *AsyncPutCache) WaitContext(ctx context.Context) error {
+	done := make(chan struct{})
+	go func() {
+		a.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
