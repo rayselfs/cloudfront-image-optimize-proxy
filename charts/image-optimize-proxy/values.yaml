@@ -45,7 +45,7 @@ networkPolicy:
   egressToDNS: true
 
 podDisruptionBudget:
-  enabled: false
+  enabled: true
   minAvailable: 1
   # maxUnavailable: 1  # mutually exclusive with minAvailable
 
