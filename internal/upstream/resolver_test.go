@@ -2,6 +2,7 @@ package upstream
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -432,4 +433,168 @@ func TestNewResolverWithEagerPresigner_InitError(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
+}
+
+func TestResolveGatewaySchemeAdded(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("image"))
+	}))
+	defer server.Close()
+
+	// Extract host:port from server URL (e.g., "http://127.0.0.1:12345" -> "127.0.0.1:12345")
+	gatewayHostPort := strings.TrimPrefix(server.URL, "http://")
+
+	req := httptest.NewRequest(http.MethodGet, "http://assets.example/images/cat.jpg", nil)
+	// Pass gateway without scheme (just host:port)
+	req.Header.Set("X-Img-Upstream-Gateway", gatewayHostPort)
+
+	sourceURL, _, _, err := NewResolver(30*time.Second, nil, nil).Resolve(req)
+	if err != nil {
+		t.Fatalf("Resolve() error = %v, want nil", err)
+	}
+
+	// Verify http:// was prepended
+	if !strings.HasPrefix(sourceURL, "http://") {
+		t.Fatalf("sourceURL = %q, want to start with http://", sourceURL)
+	}
+	if !strings.Contains(sourceURL, gatewayHostPort) {
+		t.Fatalf("sourceURL = %q, want to contain %q", sourceURL, gatewayHostPort)
+	}
+}
+
+func TestResolveGatewayContextCancellation(t *testing.T) {
+	// Create a server that never responds (blocks forever)
+	blockingServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Never write response, just block
+		select {}
+	}))
+	defer blockingServer.Close()
+
+	req := httptest.NewRequest(http.MethodGet, "http://assets.example/images/cat.jpg", nil)
+	req.Header.Set("X-Img-Upstream-Gateway", blockingServer.URL)
+
+	// Create a context that we can cancel
+	ctx, cancel := context.WithCancel(context.Background())
+	req = req.WithContext(ctx)
+
+	sourceURL, _, fetchFunc, err := NewResolver(30*time.Second, nil, nil).Resolve(req)
+	if err != nil {
+		t.Fatalf("Resolve() error = %v, want nil", err)
+	}
+	if sourceURL == "" {
+		t.Fatal("sourceURL is empty")
+	}
+
+	// Cancel context before calling fetchFunc
+	cancel()
+
+	// fetchFunc should respect the cancelled context and return a context error
+	_, _, err = fetchFunc()
+	if err == nil {
+		t.Fatal("fetchFunc() error = nil, want context error after cancellation")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("fetchFunc() error = %v, want context.Canceled", err)
+	}
+}
+
+func TestResolveS3PresignError(t *testing.T) {
+	origFactory := newS3Presigner
+	defer func() { newS3Presigner = origFactory }()
+
+	// Mock presigner that returns an error on PresignGetObject
+	errorPresigner := &mockPresignerWithError{
+		t:      t,
+		bucket: "source-bucket",
+		key:    "images/cat.png",
+		err:    fmt.Errorf("presign failed: access denied"),
+	}
+	newS3Presigner = func(ctx context.Context) (s3Presigner, error) {
+		return errorPresigner, nil
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "http://origin.example/images/cat.png", nil)
+	req.Header.Set("X-Img-Source-Type", "s3")
+	req.Header.Set("X-Img-Source-Bucket", "source-bucket")
+
+	_, _, _, err := NewResolver(30*time.Second, nil, nil).Resolve(req)
+	if err == nil {
+		t.Fatal("Resolve() error = nil, want error from presigner")
+	}
+	if !strings.Contains(err.Error(), "presign failed") {
+		t.Fatalf("error = %q, want message mentioning presign failure", err.Error())
+	}
+}
+
+func TestResolveRequestURIEmptyPath(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/" {
+			t.Fatalf("path = %q, want /", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "image/jpeg")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("root image"))
+	}))
+	defer server.Close()
+
+	// Create request with just "/" path (no additional path segments)
+	req := httptest.NewRequest(http.MethodGet, "http://assets.example/", nil)
+	req.Header.Set("X-Img-Upstream-Gateway", server.URL)
+
+	sourceURL, _, fetchFunc, err := NewResolver(30*time.Second, nil, nil).Resolve(req)
+	if err != nil {
+		t.Fatalf("Resolve() error = %v, want nil", err)
+	}
+
+	// Verify sourceURL is valid and includes the path
+	if sourceURL == "" {
+		t.Fatal("sourceURL is empty")
+	}
+	if !strings.HasSuffix(sourceURL, "/") {
+		t.Fatalf("sourceURL = %q, want to end with /", sourceURL)
+	}
+
+	// Verify fetchFunc works without panic
+	body, ct, err := fetchFunc()
+	if err != nil {
+		t.Fatalf("fetchFunc() error = %v, want nil", err)
+	}
+	defer body.Close()
+
+	if ct != "image/jpeg" {
+		t.Fatalf("contentType = %q, want image/jpeg", ct)
+	}
+	data, err := io.ReadAll(body)
+	if err != nil {
+		t.Fatalf("ReadAll() error = %v", err)
+	}
+	if string(data) != "root image" {
+		t.Fatalf("body = %q, want %q", string(data), "root image")
+	}
+}
+
+// mockPresignerWithError is a mock presigner that returns an error
+type mockPresignerWithError struct {
+	t      *testing.T
+	bucket string
+	key    string
+	err    error
+}
+
+func (m *mockPresignerWithError) PresignGetObject(ctx context.Context, params *s3.GetObjectInput, optFns ...func(*s3.PresignOptions)) (*v4.PresignedHTTPRequest, error) {
+	m.t.Helper()
+	if got := aws.ToString(params.Bucket); got != m.bucket {
+		m.t.Fatalf("Bucket = %q, want %q", got, m.bucket)
+	}
+	if got := aws.ToString(params.Key); got != m.key {
+		m.t.Fatalf("Key = %q, want %q", got, m.key)
+	}
+	return nil, m.err
+}
+
+func (m *mockPresignerWithError) PresignHeadObject(ctx context.Context, params *s3.HeadObjectInput, optFns ...func(*s3.PresignOptions)) (*v4.PresignedHTTPRequest, error) {
+	m.t.Helper()
+	return nil, m.err
 }
