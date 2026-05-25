@@ -97,3 +97,29 @@ func TestCloudFrontVerify_MetricsExempt(t *testing.T) {
 		t.Fatalf("status = %d, want 200 (metrics exempt)", w.Code)
 	}
 }
+
+func TestCloudFrontVerify_AllSecretsScanned(t *testing.T) {
+	// Verify that all secrets are scanned even when token is wrong.
+	// This ensures the constant-time comparison loop runs to completion.
+	h := CloudFrontVerify([]string{"first", "second", "third"})(okHandler())
+	r := httptest.NewRequest(http.MethodGet, "/image.jpg", nil)
+	r.Header.Set("X-Origin-Verify", "wrong-token")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 (all secrets scanned, none matched)", w.Code)
+	}
+}
+
+func TestCloudFrontVerify_MatchesLastSecret(t *testing.T) {
+	// Verify that a match on the last secret in the list is accepted.
+	// This proves the loop doesn't early-return and processes all secrets.
+	h := CloudFrontVerify([]string{"first", "second", "correct"})(okHandler())
+	r := httptest.NewRequest(http.MethodGet, "/image.jpg", nil)
+	r.Header.Set("X-Origin-Verify", "correct")
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (last secret matched)", w.Code)
+	}
+}

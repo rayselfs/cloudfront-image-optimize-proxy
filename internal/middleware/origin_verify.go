@@ -23,12 +23,15 @@ func CloudFrontVerify(secrets []string) func(http.Handler) http.Handler {
 			}
 
 			tokenHash := sha256.Sum256([]byte(r.Header.Get("X-Origin-Verify")))
+			authorized := 0
 			for _, s := range secrets {
 				secretHash := sha256.Sum256([]byte(s))
-				if subtle.ConstantTimeCompare(tokenHash[:], secretHash[:]) == 1 {
-					next.ServeHTTP(w, r)
-					return
-				}
+				authorized |= subtle.ConstantTimeCompare(tokenHash[:], secretHash[:])
+			}
+
+			if authorized == 1 {
+				next.ServeHTTP(w, r)
+				return
 			}
 
 			slog.Warn("origin verify: unauthorized access attempt",
