@@ -105,6 +105,10 @@ config:
   maxWidth: "1920"
   upstreamTimeout: "30"
   imgproxyTimeout: "30"
+  allowedUpstreamGateways: ""
+
+originVerify:
+  secretName: ""
 
 resources:
   requests:
@@ -113,3 +117,28 @@ resources:
   limits:
     cpu: 500m
     memory: 512Mi
+
+extraManifests: []
+# - apiVersion: v1
+#   kind: Secret
+#   metadata:
+#     name: image-optimize-proxy-origin-verify
+#   type: Opaque
+#   stringData:
+#     CF_ORIGIN_SECRET: "your-secret-here"
+#
+# - apiVersion: external-secrets.io/v1beta1
+#   kind: ExternalSecret
+#   metadata:
+#     name: image-optimize-proxy-origin-verify
+#   spec:
+#     refreshInterval: 1h
+#     secretStoreRef:
+#       name: aws-secrets-manager
+#       kind: ClusterSecretStore
+#     target:
+#       name: image-optimize-proxy-origin-verify
+#     data:
+#       - secretKey: CF_ORIGIN_SECRET
+#         remoteRef:
+#           key: /image-optimize-proxy/origin-verify

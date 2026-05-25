@@ -63,6 +63,10 @@ spec:
           envFrom:
             - configMapRef:
                 name: {{ include "image-optimize-proxy.fullname" . }}
+            {{- if .Values.originVerify.secretName }}
+            - secretRef:
+                name: {{ .Values.originVerify.secretName }}
+            {{- end }}
           {{- with .Values.lifecycle }}
           lifecycle:
             {{- toYaml . | nindent 12 }}

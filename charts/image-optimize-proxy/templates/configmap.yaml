@@ -12,3 +12,6 @@ data:
   MAX_WIDTH: {{ .Values.config.maxWidth | quote }}
   UPSTREAM_TIMEOUT: {{ .Values.config.upstreamTimeout | quote }}
   IMGPROXY_TIMEOUT: {{ .Values.config.imgproxyTimeout | quote }}
+  {{- if .Values.config.allowedUpstreamGateways }}
+  ALLOWED_UPSTREAM_GATEWAYS: {{ .Values.config.allowedUpstreamGateways | quote }}
+  {{- end }}
