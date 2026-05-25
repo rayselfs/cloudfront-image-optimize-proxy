@@ -42,9 +42,22 @@ func TestKeyFromRequest(t *testing.T) {
 		params ImageParams
 		want   string
 	}{
+		// Existing cases
 		{"stream.viverse.com", "/assets/hero", ImageParams{640, "webp", 75}, "stream.viverse.com/assets/hero/640_webp_75"},
 		{"stream.viverse.com", "assets/hero", ImageParams{640, "webp", 75}, "stream.viverse.com/assets/hero/640_webp_75"},
 		{"example.com", "/img/logo.png", ImageParams{320, "jpeg", 90}, "example.com/img/logo.png/320_jpeg_90"},
+
+		// Edge cases: document cache key format invariant {host}/{path}/{width}_{format}_{quality}
+		// Root path: leading / is trimmed, resulting in empty path segment
+		{"example.com", "/", ImageParams{640, "webp", 75}, "example.com//640_webp_75"},
+		// Host with port: port is included in the key (part of host)
+		{"example.com:8080", "/images/photo.jpg", ImageParams{960, "avif", 80}, "example.com:8080/images/photo.jpg/960_avif_80"},
+		// Percent-encoded path: preserved as-is (not decoded by KeyFromRequest)
+		{"cdn.example.com", "/images%2Ffoo.jpg", ImageParams{320, "jpeg", 85}, "cdn.example.com/images%2Ffoo.jpg/320_jpeg_85"},
+		// Path with spaces: preserved as-is in the key
+		{"example.com", "/my image.jpg", ImageParams{640, "webp", 75}, "example.com/my image.jpg/640_webp_75"},
+		// Normal case with all params: demonstrates full format
+		{"example.com", "/assets/banner.png", ImageParams{1280, "webp", 90}, "example.com/assets/banner.png/1280_webp_90"},
 	}
 	for _, tt := range tests {
 		got := KeyFromRequest(tt.host, tt.path, tt.params)
