@@ -267,11 +267,13 @@ func (h *Handler) process(r *http.Request, key string, params *ImageParams) (pro
 	tmpPath := tmpFile.Name()
 
 	var written int64
+	bufPtr := copyBufPool.Get().(*[]byte)
+	defer copyBufPool.Put(bufPtr)
 	if h.MaxBodyBytes > 0 {
 		limited := io.LimitReader(transformedBody, h.MaxBodyBytes+1)
-		written, err = io.Copy(tmpFile, limited)
+		written, err = io.CopyBuffer(tmpFile, limited, *bufPtr)
 	} else {
-		written, err = io.Copy(tmpFile, transformedBody)
+		written, err = io.CopyBuffer(tmpFile, transformedBody, *bufPtr)
 	}
 	if closeErr := tmpFile.Close(); err == nil {
 		err = closeErr
