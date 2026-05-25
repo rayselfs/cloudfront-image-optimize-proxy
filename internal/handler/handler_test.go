@@ -254,8 +254,8 @@ func TestImgproxyFailure(t *testing.T) {
 	if got := w.Header().Get("X-Cache"); got != "MISS" {
 		t.Fatalf("X-Cache = %q, want MISS", got)
 	}
-	if r.fetchCalls != 2 {
-		t.Fatalf("fetch calls = %d, want 2", r.fetchCalls)
+	if r.fetchCalls != 1 {
+		t.Fatalf("fetch calls = %d, want 1 (original body buffered, no second fetch)", r.fetchCalls)
 	}
 	if c.putCalls != 0 {
 		t.Fatalf("cache put calls = %d, want 0", c.putCalls)
