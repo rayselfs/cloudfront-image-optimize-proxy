@@ -9,6 +9,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/metrics"
 )
 
 type syncCache struct {
@@ -251,4 +253,103 @@ func TestAsyncPutWaitDrainsAll(t *testing.T) {
 	if calls != n {
 		t.Errorf("inner.Put calls after Wait = %d, want %d", calls, n)
 	}
+}
+
+// slowCache blocks Put for the given duration before delegating to syncCache.
+type slowCache struct {
+	syncCache
+	delay time.Duration
+}
+
+func (s *slowCache) Put(ctx context.Context, key string, body io.Reader, contentType string) error {
+	select {
+	case <-time.After(s.delay):
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return s.syncCache.Put(ctx, key, body, contentType)
+}
+
+func gaugeValue(t *testing.T, name string) float64 {
+	t.Helper()
+	mfs, err := metrics.Registry().Gather()
+	if err != nil {
+		t.Fatalf("gather metrics: %v", err)
+	}
+	for _, mf := range mfs {
+		if mf.GetName() == name {
+			for _, m := range mf.GetMetric() {
+				switch {
+				case m.Gauge != nil:
+					return m.Gauge.GetValue()
+				case m.Counter != nil:
+					return m.Counter.GetValue()
+				}
+			}
+		}
+	}
+	return 0
+}
+
+func counterValue(t *testing.T, name string) float64 {
+	t.Helper()
+	mfs, err := metrics.Registry().Gather()
+	if err != nil {
+		t.Fatalf("gather metrics: %v", err)
+	}
+	for _, mf := range mfs {
+		if mf.GetName() == name {
+			for _, m := range mf.GetMetric() {
+				if m.Counter != nil {
+					return m.Counter.GetValue()
+				}
+			}
+		}
+	}
+	return 0
+}
+
+func TestInflightGaugeIncrementDecrement(t *testing.T) {
+	metrics.Reset()
+	inner := &slowCache{delay: 50 * time.Millisecond}
+	a := WrapAsyncPut(inner, 5*time.Second, 4)
+
+	if err := a.Put(context.Background(), "key", bytes.NewReader([]byte("data")), "image/webp"); err != nil {
+		t.Fatalf("Put error: %v", err)
+	}
+
+	time.Sleep(10 * time.Millisecond)
+
+	if v := gaugeValue(t, "async_cache_put_inflight"); v != 1 {
+		t.Errorf("inflight gauge = %v, want 1", v)
+	}
+
+	a.Wait()
+
+	if v := gaugeValue(t, "async_cache_put_inflight"); v != 0 {
+		t.Errorf("inflight gauge after Wait = %v, want 0", v)
+	}
+}
+
+func TestDroppedCounterIncrements(t *testing.T) {
+	metrics.Reset()
+	block := make(chan struct{})
+	blocking := &blockingInnerCache{block: block}
+	a := WrapAsyncPut(blocking, 5*time.Second, 1)
+
+	if err := a.Put(context.Background(), "key1", bytes.NewReader([]byte("x")), "image/webp"); err != nil {
+		t.Fatalf("Put error: %v", err)
+	}
+	time.Sleep(10 * time.Millisecond)
+
+	if err := a.Put(context.Background(), "key2", bytes.NewReader([]byte("y")), "image/webp"); err != nil {
+		t.Fatalf("Put error: %v", err)
+	}
+
+	if v := counterValue(t, "async_cache_put_dropped_total"); v != 1 {
+		t.Errorf("dropped counter = %v, want 1", v)
+	}
+
+	close(block)
+	a.Wait()
 }

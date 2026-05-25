@@ -13,12 +13,20 @@ var (
 	mu  sync.Mutex
 	reg *prometheus.Registry
 
-	requestsTotal  prometheus.Counter
-	cacheHits      prometheus.Counter
-	cacheMisses    prometheus.Counter
-	cacheBypasses  prometheus.Counter
-	imgproxyErrors prometheus.Counter
-	putErrors      prometheus.Counter
+	requestsTotal         prometheus.Counter
+	cacheHits             prometheus.Counter
+	cacheMisses           prometheus.Counter
+	cacheBypasses         prometheus.Counter
+	imgproxyErrors        prometheus.Counter
+	putErrors             prometheus.Counter
+	asyncCachePutInflight prometheus.Gauge
+	asyncCachePutDropped  prometheus.Counter
+
+	httpRequestDuration   *prometheus.HistogramVec
+	imgproxyDuration      *prometheus.HistogramVec
+	s3GetDuration         *prometheus.HistogramVec
+	s3PutDuration         *prometheus.HistogramVec
+	upstreamFetchDuration *prometheus.HistogramVec
 )
 
 func init() {
@@ -56,6 +64,39 @@ func initRegistry() {
 		Name: "cache_put_errors_total",
 		Help: "S3 cache write failures",
 	})
+	asyncCachePutInflight = prometheus.NewGauge(prometheus.GaugeOpts{
+		Name: "async_cache_put_inflight",
+		Help: "Number of async S3 cache puts currently in flight",
+	})
+	asyncCachePutDropped = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "async_cache_put_dropped_total",
+		Help: "Async S3 cache puts dropped due to full semaphore",
+	})
+	httpRequestDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "http_request_duration_seconds",
+		Help:    "HTTP request latency in seconds",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"method", "status_class", "cache_status"})
+	imgproxyDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "imgproxy_duration_seconds",
+		Help:    "imgproxy transform latency in seconds",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"status_class"})
+	s3GetDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "s3_get_duration_seconds",
+		Help:    "S3 cache GET latency in seconds",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"outcome"})
+	s3PutDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "s3_put_duration_seconds",
+		Help:    "S3 cache PUT latency in seconds",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"outcome"})
+	upstreamFetchDuration = prometheus.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "upstream_fetch_duration_seconds",
+		Help:    "Upstream fetch latency in seconds",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"outcome"})
 
 	reg.MustRegister(
 		requestsTotal,
@@ -64,6 +105,13 @@ func initRegistry() {
 		cacheBypasses,
 		imgproxyErrors,
 		putErrors,
+		asyncCachePutInflight,
+		asyncCachePutDropped,
+		httpRequestDuration,
+		imgproxyDuration,
+		s3GetDuration,
+		s3PutDuration,
+		upstreamFetchDuration,
 	)
 }
 
@@ -81,12 +129,15 @@ func Registry() *prometheus.Registry {
 	return reg
 }
 
-func IncRequest()       { mu.Lock(); requestsTotal.Inc(); mu.Unlock() }
-func IncCacheHit()      { mu.Lock(); cacheHits.Inc(); mu.Unlock() }
-func IncCacheMiss()     { mu.Lock(); cacheMisses.Inc(); mu.Unlock() }
-func IncCacheBypass()   { mu.Lock(); cacheBypasses.Inc(); mu.Unlock() }
-func IncImgproxyError() { mu.Lock(); imgproxyErrors.Inc(); mu.Unlock() }
-func IncPutError()      { mu.Lock(); putErrors.Inc(); mu.Unlock() }
+func IncRequest()                { mu.Lock(); requestsTotal.Inc(); mu.Unlock() }
+func IncCacheHit()               { mu.Lock(); cacheHits.Inc(); mu.Unlock() }
+func IncCacheMiss()              { mu.Lock(); cacheMisses.Inc(); mu.Unlock() }
+func IncCacheBypass()            { mu.Lock(); cacheBypasses.Inc(); mu.Unlock() }
+func IncImgproxyError()          { mu.Lock(); imgproxyErrors.Inc(); mu.Unlock() }
+func IncPutError()               { mu.Lock(); putErrors.Inc(); mu.Unlock() }
+func IncAsyncCachePutInflight()  { mu.Lock(); asyncCachePutInflight.Inc(); mu.Unlock() }
+func DecAsyncCachePutInflight()  { mu.Lock(); asyncCachePutInflight.Dec(); mu.Unlock() }
+func IncAsyncCachePutDropped()   { mu.Lock(); asyncCachePutDropped.Inc(); mu.Unlock() }
 
 // Handler returns an HTTP handler that serves Prometheus metrics.
 func Handler() http.Handler {
@@ -96,4 +147,39 @@ func Handler() http.Handler {
 		mu.Unlock()
 		h.ServeHTTP(w, r)
 	})
+}
+
+// ObserveHTTPRequest records an HTTP request duration sample.
+func ObserveHTTPRequest(method, statusClass, cacheStatus string, seconds float64) {
+	mu.Lock()
+	httpRequestDuration.WithLabelValues(method, statusClass, cacheStatus).Observe(seconds)
+	mu.Unlock()
+}
+
+// ObserveImgproxy records an imgproxy transform duration sample.
+func ObserveImgproxy(statusClass string, seconds float64) {
+	mu.Lock()
+	imgproxyDuration.WithLabelValues(statusClass).Observe(seconds)
+	mu.Unlock()
+}
+
+// ObserveS3Get records an S3 cache GET duration sample.
+func ObserveS3Get(outcome string, seconds float64) {
+	mu.Lock()
+	s3GetDuration.WithLabelValues(outcome).Observe(seconds)
+	mu.Unlock()
+}
+
+// ObserveS3Put records an S3 cache PUT duration sample.
+func ObserveS3Put(outcome string, seconds float64) {
+	mu.Lock()
+	s3PutDuration.WithLabelValues(outcome).Observe(seconds)
+	mu.Unlock()
+}
+
+// ObserveUpstreamFetch records an upstream fetch duration sample.
+func ObserveUpstreamFetch(outcome string, seconds float64) {
+	mu.Lock()
+	upstreamFetchDuration.WithLabelValues(outcome).Observe(seconds)
+	mu.Unlock()
 }

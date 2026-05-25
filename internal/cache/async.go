@@ -48,15 +48,18 @@ func (a *AsyncPutCache) Put(_ context.Context, key string, body io.Reader, conte
 	select {
 	case a.sem <- struct{}{}:
 	default:
+		metrics.IncAsyncCachePutDropped()
 		slog.Warn("async cache put dropped: worker pool full", "key_hash", keyHash(key))
 		metrics.IncPutError()
 		return nil
 	}
 
+	metrics.IncAsyncCachePutInflight()
 	a.wg.Add(1)
 	go func() {
 		defer a.wg.Done()
 		defer func() { <-a.sem }()
+		defer metrics.DecAsyncCachePutInflight()
 
 		putCtx, cancel := context.WithTimeout(context.Background(), a.timeout)
 		defer cancel()

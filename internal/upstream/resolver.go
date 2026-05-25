@@ -15,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws/signer/v4"
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/metrics"
 )
 
 // Resolver determines the upstream source for an image.
@@ -169,17 +170,14 @@ func (d *DefaultResolver) resolveS3(r *http.Request) (string, func() (string, er
 		}
 	}
 
+	start := time.Now()
 	presigned, err := d.presigner.PresignGetObject(r.Context(), &s3.GetObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(strings.TrimPrefix(r.URL.Path, "/")),
 	})
 	if err != nil {
+		metrics.ObserveUpstreamFetch("error", time.Since(start).Seconds())
 		return "", nil, nil, err
-	}
-
-	sourceURL := presigned.URL
-	fetchFunc := func() (io.ReadCloser, string, error) {
-		return d.fetchHTTP(r.Context(), sourceURL, "")
 	}
 
 	headPresigned, err := d.presigner.PresignHeadObject(r.Context(), &s3.HeadObjectInput{
@@ -187,8 +185,16 @@ func (d *DefaultResolver) resolveS3(r *http.Request) (string, func() (string, er
 		Key:    aws.String(strings.TrimPrefix(r.URL.Path, "/")),
 	})
 	if err != nil {
+		metrics.ObserveUpstreamFetch("error", time.Since(start).Seconds())
 		return "", nil, nil, err
 	}
+	metrics.ObserveUpstreamFetch("success", time.Since(start).Seconds())
+
+	sourceURL := presigned.URL
+	fetchFunc := func() (io.ReadCloser, string, error) {
+		return d.fetchHTTP(r.Context(), sourceURL, "")
+	}
+
 	headURL := headPresigned.URL
 	headFunc := func() (string, error) {
 		return d.headHTTP(r.Context(), headURL, "")
