@@ -9,13 +9,13 @@ import (
 	"syscall"
 	"time"
 
-	"dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/cache"
-	"dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/coalesce"
-	appconfig "dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/config"
-	"dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/handler"
-	"dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/imgproxy"
-	"dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/middleware"
-	"dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/upstream"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/cache"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/coalesce"
+	appconfig "github.com/rayselfs/cloudfront-image-optimize-proxy/internal/config"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/handler"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/imgproxy"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/middleware"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/upstream"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -38,7 +38,7 @@ func main() {
 
 	s3Cache := cache.NewS3Cache(s3.NewFromConfig(awsCfg), cfg.CacheS3Bucket)
 	imgproxyClient := imgproxy.NewClient(cfg.ImgproxyURL, cfg.ImgproxyTimeout)
-	resolver := upstream.NewResolver(cfg.UpstreamTimeout)
+	resolver := upstream.NewResolver(cfg.UpstreamTimeout, cfg.AllowedUpstreamGateways)
 	coalescer := coalesce.New()
 	imageHandler := handler.New(s3Cache, imgproxyClient, resolver, coalescer, cfg.MaxWidth)
 
@@ -74,7 +74,7 @@ func main() {
 
 	srv := &http.Server{
 		Addr:         cfg.ListenAddr,
-		Handler:      middleware.Logging(mux),
+		Handler:      middleware.Logging(middleware.CloudFrontVerify(cfg.OriginSecrets)(mux)),
 		ReadTimeout:  30 * time.Second,
 		WriteTimeout: 60 * time.Second,
 		IdleTimeout:  120 * time.Second,

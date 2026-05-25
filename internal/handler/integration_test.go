@@ -11,10 +11,10 @@ import (
 	"testing"
 	"time"
 
-	"dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/cache"
-	"dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/coalesce"
-	"dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/imgproxy"
-	"dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/upstream"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/cache"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/coalesce"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/imgproxy"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/upstream"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -98,7 +98,7 @@ func TestIntegrationImageOptimizationFlow(t *testing.T) {
 	h := New(
 		s3Cache,
 		imgproxy.NewClient(imgproxyServer.URL, 30*time.Second),
-		upstream.NewResolver(30 * time.Second),
+		upstream.NewResolver(30*time.Second, nil),
 		coalesce.New(),
 		1920,
 	)
