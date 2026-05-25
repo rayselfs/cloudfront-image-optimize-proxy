@@ -10,8 +10,8 @@ import (
 	"net/url"
 	"testing"
 
-	"dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/cache"
-	"dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy/internal/imgproxy"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/cache"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/imgproxy"
 )
 
 type mockCache struct {

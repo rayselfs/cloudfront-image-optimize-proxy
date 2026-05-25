@@ -1,4 +1,4 @@
-module dev.azure.com/viveportengineering/OPS/_git/viverse-cf-engine/packages/image-optimize-proxy
+module github.com/rayselfs/cloudfront-image-optimize-proxy
 
 go 1.25.0
 
