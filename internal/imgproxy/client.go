@@ -9,6 +9,10 @@ import (
 	"time"
 
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/requestid"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/tracing"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // TransformParams holds parameters for image transformation.
@@ -61,11 +65,22 @@ func buildProcessingURL(baseURL, sourceURL string, params TransformParams) strin
 
 // Transform fetches the transformed image from imgproxy.
 func (c *Client) Transform(ctx context.Context, sourceURL string, params TransformParams) (io.ReadCloser, string, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "imgproxy.transform",
+		trace.WithAttributes(
+			attribute.Int("imgproxy.width", params.Width),
+			attribute.String("imgproxy.format", params.Format),
+			attribute.Int("imgproxy.quality", params.Quality),
+		),
+	)
+	defer span.End()
+
 	url := buildProcessingURL(c.baseURL, sourceURL, params)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
 	if err != nil {
-		return nil, "", fmt.Errorf("imgproxy: build request: %w", err)
+		err = fmt.Errorf("imgproxy: build request: %w", err)
+		span.RecordError(err)
+		return nil, "", err
 	}
 
 	if id := requestid.FromContext(ctx); id != "" {
@@ -74,14 +89,19 @@ func (c *Client) Transform(ctx context.Context, sourceURL string, params Transfo
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, "", fmt.Errorf("imgproxy: request failed: %w", err)
+		err = fmt.Errorf("imgproxy: request failed: %w", err)
+		span.RecordError(err)
+		return nil, "", err
 	}
 
 	if resp.StatusCode != http.StatusOK {
 		snippet := make([]byte, 256)
 		n, _ := resp.Body.Read(snippet)
 		resp.Body.Close()
-		return nil, "", fmt.Errorf("imgproxy: unexpected status %d: %s", resp.StatusCode, snippet[:n])
+		err = fmt.Errorf("imgproxy: unexpected status %d: %s", resp.StatusCode, snippet[:n])
+		span.SetStatus(codes.Error, fmt.Sprintf("unexpected status %d", resp.StatusCode))
+		span.RecordError(err)
+		return nil, "", err
 	}
 
 	return resp.Body, resp.Header.Get("Content-Type"), nil

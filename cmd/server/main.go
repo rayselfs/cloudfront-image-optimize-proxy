@@ -17,6 +17,7 @@ import (
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/imgproxy"
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/metrics"
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/middleware"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/tracing"
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/upstream"
 
 	awsconfig "github.com/aws/aws-sdk-go-v2/config"
@@ -75,6 +76,15 @@ func main() {
 		slog.Error("load config", "error", err)
 		os.Exit(1)
 	}
+	shutdownTracing, tracingEnabled, err := tracing.Init(context.Background())
+	if err != nil {
+		slog.Error("init tracing", "error", err)
+		os.Exit(1)
+	}
+	if tracingEnabled {
+		slog.Info("tracing enabled")
+	}
+	defer shutdownTracing(context.Background())
 
 	// Startup security warnings.
 	if len(cfg.OriginSecrets) == 0 {
@@ -120,7 +130,7 @@ func main() {
 	mux.Handle("GET /metrics", metrics.Handler())
 	mux.Handle("/", imageHandler)
 
-	srv := newHTTPServer(cfg.ListenAddr, middleware.CorrelationID(middleware.SecurityHeaders(middleware.Logging(middleware.CloudFrontVerify(cfg.OriginSecrets)(mux)))))
+	srv := newHTTPServer(cfg.ListenAddr, middleware.CorrelationID(middleware.Tracing(middleware.SecurityHeaders(middleware.Logging(middleware.CloudFrontVerify(cfg.OriginSecrets)(mux))))))
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()

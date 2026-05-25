@@ -17,6 +17,10 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/metrics"
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/requestid"
+	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/tracing"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/trace"
 )
 
 // Resolver determines the upstream source for an image.
@@ -172,21 +176,27 @@ func (d *DefaultResolver) resolveS3(r *http.Request) (string, func() (string, er
 	}
 
 	start := time.Now()
-	presigned, err := d.presigner.PresignGetObject(r.Context(), &s3.GetObjectInput{
+	ctx, span := tracing.Tracer().Start(r.Context(), "upstream.presign",
+		trace.WithAttributes(attribute.String("upstream.type", "s3")),
+	)
+	defer span.End()
+	presigned, err := d.presigner.PresignGetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(strings.TrimPrefix(r.URL.Path, "/")),
 	})
 	if err != nil {
 		metrics.ObserveUpstreamFetch("error", time.Since(start).Seconds())
+		span.RecordError(err)
 		return "", nil, nil, err
 	}
 
-	headPresigned, err := d.presigner.PresignHeadObject(r.Context(), &s3.HeadObjectInput{
+	headPresigned, err := d.presigner.PresignHeadObject(ctx, &s3.HeadObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(strings.TrimPrefix(r.URL.Path, "/")),
 	})
 	if err != nil {
 		metrics.ObserveUpstreamFetch("error", time.Since(start).Seconds())
+		span.RecordError(err)
 		return "", nil, nil, err
 	}
 	metrics.ObserveUpstreamFetch("success", time.Since(start).Seconds())
@@ -269,8 +279,14 @@ func (d *DefaultResolver) headHTTP(ctx context.Context, rawURL, host string) (st
 }
 
 func (d *DefaultResolver) doFetch(ctx context.Context, rawURL, host string) (io.ReadCloser, string, error) {
+	ctx, span := tracing.Tracer().Start(ctx, "upstream.fetch",
+		trace.WithAttributes(attribute.String("upstream.type", "http")),
+	)
+	defer span.End()
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
+		span.RecordError(err)
 		return nil, "", err
 	}
 	if host != "" {
@@ -282,11 +298,15 @@ func (d *DefaultResolver) doFetch(ctx context.Context, rawURL, host string) (io.
 
 	res, err := d.httpClient.Do(req)
 	if err != nil {
+		span.RecordError(err)
 		return nil, "", err
 	}
 	if res.StatusCode < http.StatusOK || res.StatusCode >= http.StatusMultipleChoices {
 		res.Body.Close()
-		return nil, "", &upstreamStatusError{Code: res.StatusCode}
+		err := &upstreamStatusError{Code: res.StatusCode}
+		span.SetStatus(codes.Error, fmt.Sprintf("unexpected status %d", res.StatusCode))
+		span.RecordError(err)
+		return nil, "", err
 	}
 
 	return res.Body, res.Header.Get("Content-Type"), nil
