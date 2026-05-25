@@ -122,6 +122,22 @@ func TestTransformError(t *testing.T) {
 	}
 }
 
+func TestNewClientWithTransport(t *testing.T) {
+	c := NewClientWithTransport("http://localhost:8081", 5*time.Second, nil)
+	if c.httpClient.Timeout != 5*time.Second {
+		t.Fatalf("timeout = %v, want 5s", c.httpClient.Timeout)
+	}
+	if c.httpClient.Transport != nil {
+		t.Fatalf("expected nil transport (uses default), got %T", c.httpClient.Transport)
+	}
+
+	tr := &http.Transport{}
+	c2 := NewClientWithTransport("http://localhost:8081", 5*time.Second, tr)
+	if c2.httpClient.Transport != tr {
+		t.Fatalf("transport not wired through")
+	}
+}
+
 func TestTransformTimeout(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		time.Sleep(200 * time.Millisecond)
