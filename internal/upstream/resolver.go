@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -33,13 +34,15 @@ var newS3Presigner = func(ctx context.Context) (s3Presigner, error) {
 
 // DefaultResolver resolves image sources from either S3 or the upstream gateway.
 type DefaultResolver struct {
-	httpClient *http.Client
+	httpClient      *http.Client
+	allowedGateways []string
 }
 
 // NewResolver creates the default upstream resolver with the given HTTP timeout.
-func NewResolver(timeout time.Duration) *DefaultResolver {
+func NewResolver(timeout time.Duration, allowedGateways []string) *DefaultResolver {
 	return &DefaultResolver{
-		httpClient: &http.Client{Timeout: timeout},
+		httpClient:      &http.Client{Timeout: timeout},
+		allowedGateways: allowedGateways,
 	}
 }
 
@@ -49,12 +52,33 @@ func (d *DefaultResolver) Resolve(r *http.Request) (string, func() (io.ReadClose
 		return d.resolveS3(r)
 	}
 
-	gateway := strings.TrimPrefix(r.Header.Get("X-Img-Upstream-Gateway"), "http://")
-	if gateway == "" {
+	rawGateway := strings.TrimSpace(r.Header.Get("X-Img-Upstream-Gateway"))
+	if rawGateway == "" {
 		return "", nil, fmt.Errorf("X-Img-Upstream-Gateway header is required")
 	}
 
-	sourceURL := "http://" + gateway + requestURI(r)
+	if !strings.Contains(rawGateway, "://") {
+		rawGateway = "http://" + rawGateway
+	}
+	gatewayURL, err := url.Parse(rawGateway)
+	if err != nil || gatewayURL.Host == "" {
+		return "", nil, fmt.Errorf("X-Img-Upstream-Gateway has invalid value")
+	}
+
+	if len(d.allowedGateways) > 0 {
+		allowed := false
+		for _, g := range d.allowedGateways {
+			if gatewayURL.Host == g {
+				allowed = true
+				break
+			}
+		}
+		if !allowed {
+			return "", nil, fmt.Errorf("upstream gateway not in allowlist")
+		}
+	}
+
+	sourceURL := gatewayURL.Scheme + "://" + gatewayURL.Host + requestURI(r)
 	fetchFunc := func() (io.ReadCloser, string, error) {
 		return d.fetchHTTP(r.Context(), sourceURL, r.Host)
 	}
