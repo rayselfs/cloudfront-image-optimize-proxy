@@ -135,6 +135,7 @@ config:
   allowAllSourceBuckets: "false"
   s3MultipartThresholdBytes: "5242880"
   s3ReadinessCheckEnabled: "false"
+  defaultQuality: "75"
 
 originVerify:
   secretName: ""

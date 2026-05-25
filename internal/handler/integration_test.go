@@ -106,6 +106,7 @@ func TestIntegrationImageOptimizationFlow(t *testing.T) {
 		coalesce.New(),
 		1920,
 		0,
+		75,
 	)
 
 	assertRequest(t, h, "https://assets.example.com/images/hero.png?imwidth=640&f=webp&q=75", upstreamServer.URL, transformedImage, "image/webp", "MISS")
@@ -178,6 +179,7 @@ func TestIntegrationImgproxyFallback(t *testing.T) {
 		coalesce.New(),
 		1920,
 		0,
+		75,
 	)
 
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/image.jpg?imwidth=640&f=webp&q=75", nil)

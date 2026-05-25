@@ -34,6 +34,7 @@ type Handler struct {
 	Coalescer    coalesce.Coalescer
 	MaxWidth     int
 	MaxBodyBytes int64
+	DefaultQuality int
 }
 
 type processResult struct {
@@ -44,20 +45,21 @@ type processResult struct {
 }
 
 // New creates a new Handler. maxBodyBytes limits upstream/transform body reads (0 = no limit).
-func New(c cache.FileCache, t imgproxy.Transformer, r upstream.Resolver, coal coalesce.Coalescer, maxWidth int, maxBodyBytes int64) *Handler {
+func New(c cache.FileCache, t imgproxy.Transformer, r upstream.Resolver, coal coalesce.Coalescer, maxWidth int, maxBodyBytes int64, defaultQuality int) *Handler {
 	return &Handler{
-		Cache:        c,
-		Transformer:  t,
-		Resolver:     r,
-		Coalescer:    coal,
-		MaxWidth:     maxWidth,
-		MaxBodyBytes: maxBodyBytes,
+		Cache:          c,
+		Transformer:    t,
+		Resolver:       r,
+		Coalescer:      coal,
+		MaxWidth:       maxWidth,
+		MaxBodyBytes:   maxBodyBytes,
+		DefaultQuality: defaultQuality,
 	}
 }
 
 // ServeHTTP implements http.Handler.
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	params := ParseParams(r.URL.Query())
+	params := ParseParams(r.URL.Query(), h.DefaultQuality)
 	if params == nil {
 		h.passThrough(w, r)
 		return

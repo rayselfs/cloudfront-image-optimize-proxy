@@ -14,7 +14,7 @@ type ImageParams struct {
 
 // ParseParams extracts imwidth, f, q from query string.
 // Returns nil if no optimize params are present or imwidth is invalid.
-func ParseParams(query url.Values) *ImageParams {
+func ParseParams(query url.Values, defaultQuality int) *ImageParams {
 	widthValue := query.Get("imwidth")
 	if widthValue == "" {
 		return nil
@@ -30,7 +30,7 @@ func ParseParams(query url.Values) *ImageParams {
 		return nil
 	}
 
-	quality := 75
+	quality := defaultQuality
 	if qualityValue := query.Get("q"); qualityValue != "" {
 		parsedQuality, err := strconv.Atoi(qualityValue)
 		if err == nil {

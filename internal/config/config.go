@@ -21,6 +21,7 @@ const (
 	defaultAsyncCachePutConcurrency = 32
 	defaultAsyncCachePutTimeout     = 30 * time.Second
 	defaultMultipartThresholdBytes int64 = 5 * 1024 * 1024 // 5 MiB
+	defaultQuality                 = 75
 )
 
 // Config holds the service configuration loaded from environment variables.
@@ -43,6 +44,7 @@ type Config struct {
 	AllowAllSourceBuckets       bool
 	MultipartThresholdBytes     int64
 	S3ReadinessCheckEnabled     bool
+	DefaultQuality              int
 }
 
 // Load reads service configuration from environment variables.
@@ -87,6 +89,11 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
+	defaultQualityVal, err := loadPositiveInt("DEFAULT_QUALITY", defaultQuality)
+	if err != nil {
+		return nil, err
+	}
+
 	cfg := &Config{
 		ListenAddr:                  envOrDefault("LISTEN_ADDR", defaultListenAddr),
 		ImgproxyURL:                 envOrDefault("IMGPROXY_URL", defaultImgproxyURL),
@@ -106,6 +113,7 @@ func Load() (*Config, error) {
 		AllowAllSourceBuckets:       loadBool("ALLOW_ALL_SOURCE_BUCKETS"),
 		MultipartThresholdBytes:     multipartThreshold,
 		S3ReadinessCheckEnabled:     loadBool("S3_READINESS_CHECK_ENABLED"),
+		DefaultQuality:              defaultQualityVal,
 	}
 
 	if cfg.CacheS3Bucket == "" {
@@ -209,6 +217,10 @@ func (c *Config) Validate() error {
 
 	if _, err := url.ParseRequestURI(c.ImgproxyURL); err != nil || !strings.HasPrefix(c.ImgproxyURL, "http") {
 		return fmt.Errorf("IMGPROXY_URL %q is not a valid HTTP URL", c.ImgproxyURL)
+	}
+
+	if c.DefaultQuality < 1 || c.DefaultQuality > 100 {
+		return fmt.Errorf("DEFAULT_QUALITY must be between 1 and 100")
 	}
 
 	return nil

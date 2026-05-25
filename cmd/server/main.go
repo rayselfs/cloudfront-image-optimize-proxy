@@ -123,7 +123,7 @@ func main() {
 		os.Exit(1)
 	}
 	coalescer := coalesce.New()
-	imageHandler := handler.New(asyncCache, imgproxyClient, resolver, coalescer, cfg.MaxWidth, cfg.MaxBodyBytes)
+	imageHandler := handler.New(asyncCache, imgproxyClient, resolver, coalescer, cfg.MaxWidth, cfg.MaxBodyBytes, cfg.DefaultQuality)
 
 	readyClient := &http.Client{Timeout: 2 * time.Second}
 

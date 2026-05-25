@@ -28,3 +28,4 @@ data:
   ALLOW_ALL_SOURCE_BUCKETS: {{ .Values.config.allowAllSourceBuckets | quote }}
   S3_MULTIPART_THRESHOLD_BYTES: {{ .Values.config.s3MultipartThresholdBytes | quote }}
   S3_READINESS_CHECK_ENABLED: {{ .Values.config.s3ReadinessCheckEnabled | quote }}
+  DEFAULT_QUALITY: {{ .Values.config.defaultQuality | quote }}
