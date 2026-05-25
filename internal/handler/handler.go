@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"io"
@@ -69,7 +70,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		metrics.IncCacheHit()
 		return
 	} else if !errors.Is(err, cache.ErrNotFound) {
-		slog.Error("handler: cache get", "key", key, "error", err)
+		slog.Error("handler: cache get", "key_hash", cacheKeyHash(key), "error", err)
 	}
 
 	value, err, _ := h.Coalescer.Do(r.Context(), key, func() (interface{}, error) {
@@ -91,7 +92,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if result.streamFromCache {
 		body, contentType, err := h.Cache.Get(r.Context(), key)
 		if err != nil {
-			slog.Error("handler: cache get after fill", "key", key, "error", err)
+			slog.Error("handler: cache get after fill", "key_hash", cacheKeyHash(key), "error", err)
 			h.writeError(w)
 			return
 		}
@@ -109,7 +110,16 @@ func (h *Handler) streamResponse(w http.ResponseWriter, body io.Reader, contentT
 	}
 	w.Header().Set("Cache-Control", "public, max-age=31536000")
 	w.Header().Set("X-Cache", cacheStatus)
-	_, _ = io.Copy(w, body)
+	r := body
+	if h.MaxBodyBytes > 0 {
+		r = io.LimitReader(body, h.MaxBodyBytes)
+	}
+	_, _ = io.Copy(w, r)
+}
+
+func cacheKeyHash(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return fmt.Sprintf("%x", sum[:6])
 }
 
 func (h *Handler) passThrough(w http.ResponseWriter, r *http.Request) {
@@ -264,7 +274,7 @@ func (h *Handler) process(r *http.Request, key string, params *ImageParams) (pro
 	}
 
 	if err := h.Cache.PutFile(r.Context(), key, tmpPath, transformedContentType); err != nil {
-		slog.Error("handler: cache put file", "key", key, "error", err)
+		slog.Error("handler: cache put file", "key_hash", cacheKeyHash(key), "error", err)
 		_ = os.Remove(tmpPath)
 		return processResult{}, err
 	}
