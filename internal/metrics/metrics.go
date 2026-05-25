@@ -1,49 +1,99 @@
 package metrics
 
 import (
-	"fmt"
 	"net/http"
-	"sync/atomic"
+	"sync"
+
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 var (
-	requestsTotal  atomic.Int64
-	cacheHits      atomic.Int64
-	cacheMisses    atomic.Int64
-	cacheBypasses  atomic.Int64
-	imgproxyErrors atomic.Int64
-	putErrors      atomic.Int64
+	mu  sync.Mutex
+	reg *prometheus.Registry
+
+	requestsTotal  prometheus.Counter
+	cacheHits      prometheus.Counter
+	cacheMisses    prometheus.Counter
+	cacheBypasses  prometheus.Counter
+	imgproxyErrors prometheus.Counter
+	putErrors      prometheus.Counter
 )
 
-func IncRequest()       { requestsTotal.Add(1) }
-func IncCacheHit()      { cacheHits.Add(1) }
-func IncCacheMiss()     { cacheMisses.Add(1) }
-func IncCacheBypass()   { cacheBypasses.Add(1) }
-func IncImgproxyError() { imgproxyErrors.Add(1) }
-func IncPutError()      { putErrors.Add(1) }
-
-// Reset zeroes all counters. Intended for use in tests only.
-func Reset() {
-	requestsTotal.Store(0)
-	cacheHits.Store(0)
-	cacheMisses.Store(0)
-	cacheBypasses.Store(0)
-	imgproxyErrors.Store(0)
-	putErrors.Store(0)
+func init() {
+	initRegistry()
 }
 
+func initRegistry() {
+	reg = prometheus.NewRegistry()
+	reg.MustRegister(
+		collectors.NewGoCollector(),
+		collectors.NewProcessCollector(collectors.ProcessCollectorOpts{}),
+	)
+
+	requestsTotal = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "http_requests_total",
+		Help: "Total image proxy requests",
+	})
+	cacheHits = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "cache_hits_total",
+		Help: "Cache HIT responses served",
+	})
+	cacheMisses = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "cache_misses_total",
+		Help: "Cache MISS responses after transform",
+	})
+	cacheBypasses = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "cache_bypasses_total",
+		Help: "Requests bypassed due to non-image content",
+	})
+	imgproxyErrors = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "imgproxy_errors_total",
+		Help: "imgproxy transform failures (fell back to original)",
+	})
+	putErrors = prometheus.NewCounter(prometheus.CounterOpts{
+		Name: "cache_put_errors_total",
+		Help: "S3 cache write failures",
+	})
+
+	reg.MustRegister(
+		requestsTotal,
+		cacheHits,
+		cacheMisses,
+		cacheBypasses,
+		imgproxyErrors,
+		putErrors,
+	)
+}
+
+// Reset re-creates the registry and all counters. Intended for use in tests only.
+func Reset() {
+	mu.Lock()
+	defer mu.Unlock()
+	initRegistry()
+}
+
+// Registry returns the package-level prometheus registry.
+func Registry() *prometheus.Registry {
+	mu.Lock()
+	defer mu.Unlock()
+	return reg
+}
+
+func IncRequest()       { mu.Lock(); requestsTotal.Inc(); mu.Unlock() }
+func IncCacheHit()      { mu.Lock(); cacheHits.Inc(); mu.Unlock() }
+func IncCacheMiss()     { mu.Lock(); cacheMisses.Inc(); mu.Unlock() }
+func IncCacheBypass()   { mu.Lock(); cacheBypasses.Inc(); mu.Unlock() }
+func IncImgproxyError() { mu.Lock(); imgproxyErrors.Inc(); mu.Unlock() }
+func IncPutError()      { mu.Lock(); putErrors.Inc(); mu.Unlock() }
+
+// Handler returns an HTTP handler that serves Prometheus metrics.
 func Handler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "text/plain; version=0.0.4; charset=utf-8")
-		writeCounter(w, "http_requests_total", "Total image proxy requests", requestsTotal.Load())
-		writeCounter(w, "cache_hits_total", "Cache HIT responses served", cacheHits.Load())
-		writeCounter(w, "cache_misses_total", "Cache MISS responses after transform", cacheMisses.Load())
-		writeCounter(w, "cache_bypasses_total", "Requests bypassed due to non-image content", cacheBypasses.Load())
-		writeCounter(w, "imgproxy_errors_total", "imgproxy transform failures (fell back to original)", imgproxyErrors.Load())
-		writeCounter(w, "cache_put_errors_total", "S3 cache write failures", putErrors.Load())
+		mu.Lock()
+		h := promhttp.HandlerFor(reg, promhttp.HandlerOpts{})
+		mu.Unlock()
+		h.ServeHTTP(w, r)
 	})
-}
-
-func writeCounter(w http.ResponseWriter, name, help string, value int64) {
-	fmt.Fprintf(w, "# HELP %s %s\n# TYPE %s counter\n%s %d\n", name, help, name, name, value)
 }
