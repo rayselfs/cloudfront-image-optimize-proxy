@@ -19,13 +19,15 @@ const (
 
 // Config holds the service configuration loaded from environment variables.
 type Config struct {
-	ListenAddr      string
-	ImgproxyURL     string
-	CacheS3Bucket   string
-	CacheS3Region   string
-	MaxWidth        int
-	UpstreamTimeout time.Duration
-	ImgproxyTimeout time.Duration
+	ListenAddr              string
+	ImgproxyURL             string
+	CacheS3Bucket           string
+	CacheS3Region           string
+	MaxWidth                int
+	UpstreamTimeout         time.Duration
+	ImgproxyTimeout         time.Duration
+	OriginSecrets           []string
+	AllowedUpstreamGateways []string
 }
 
 // Load reads service configuration from environment variables.
@@ -46,13 +48,15 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		ListenAddr:      envOrDefault("LISTEN_ADDR", defaultListenAddr),
-		ImgproxyURL:     envOrDefault("IMGPROXY_URL", defaultImgproxyURL),
-		CacheS3Bucket:   strings.TrimSpace(os.Getenv("CACHE_S3_BUCKET")),
-		CacheS3Region:   envOrDefault("CACHE_S3_REGION", defaultCacheS3Region),
-		MaxWidth:        maxWidth,
-		UpstreamTimeout: upstreamTimeout,
-		ImgproxyTimeout: imgproxyTimeout,
+		ListenAddr:              envOrDefault("LISTEN_ADDR", defaultListenAddr),
+		ImgproxyURL:             envOrDefault("IMGPROXY_URL", defaultImgproxyURL),
+		CacheS3Bucket:           strings.TrimSpace(os.Getenv("CACHE_S3_BUCKET")),
+		CacheS3Region:           envOrDefault("CACHE_S3_REGION", defaultCacheS3Region),
+		MaxWidth:                maxWidth,
+		UpstreamTimeout:         upstreamTimeout,
+		ImgproxyTimeout:         imgproxyTimeout,
+		OriginSecrets:           loadCSV("CF_ORIGIN_SECRET"),
+		AllowedUpstreamGateways: loadCSV("ALLOWED_UPSTREAM_GATEWAYS"),
 	}
 
 	if cfg.CacheS3Bucket == "" {
@@ -102,4 +106,19 @@ func loadDurationSeconds(name string, fallback time.Duration) (time.Duration, er
 	}
 
 	return time.Duration(secs) * time.Second, nil
+}
+
+func loadCSV(name string) []string {
+	raw := strings.TrimSpace(os.Getenv(name))
+	if raw == "" {
+		return nil
+	}
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if v := strings.TrimSpace(p); v != "" {
+			out = append(out, v)
+		}
+	}
+	return out
 }

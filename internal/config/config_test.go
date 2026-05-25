@@ -1,6 +1,8 @@
 package config
 
-import "testing"
+import (
+	"testing"
+)
 
 func TestDefaultConfig(t *testing.T) {
 	t.Setenv("LISTEN_ADDR", "")
@@ -65,5 +67,79 @@ func TestCustomConfig(t *testing.T) {
 	}
 	if cfg.MaxWidth != 2048 {
 		t.Fatalf("MaxWidth = %d, want %d", cfg.MaxWidth, 2048)
+	}
+}
+
+func TestLoadCSV_Empty(t *testing.T) {
+	t.Setenv("CF_ORIGIN_SECRET", "")
+	t.Setenv("CACHE_S3_BUCKET", "test-bucket")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.OriginSecrets) != 0 {
+		t.Fatalf("OriginSecrets = %v, want empty", cfg.OriginSecrets)
+	}
+}
+
+func TestLoadCSV_Single(t *testing.T) {
+	t.Setenv("CF_ORIGIN_SECRET", "mysecret")
+	t.Setenv("CACHE_S3_BUCKET", "test-bucket")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.OriginSecrets) != 1 || cfg.OriginSecrets[0] != "mysecret" {
+		t.Fatalf("OriginSecrets = %v, want [mysecret]", cfg.OriginSecrets)
+	}
+}
+
+func TestLoadCSV_Multiple(t *testing.T) {
+	t.Setenv("CF_ORIGIN_SECRET", "new-secret,old-secret")
+	t.Setenv("CACHE_S3_BUCKET", "test-bucket")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.OriginSecrets) != 2 {
+		t.Fatalf("OriginSecrets len = %d, want 2", len(cfg.OriginSecrets))
+	}
+	if cfg.OriginSecrets[0] != "new-secret" || cfg.OriginSecrets[1] != "old-secret" {
+		t.Fatalf("OriginSecrets = %v, want [new-secret old-secret]", cfg.OriginSecrets)
+	}
+}
+
+func TestLoadCSV_AllowedGateways(t *testing.T) {
+	t.Setenv("ALLOWED_UPSTREAM_GATEWAYS", "api.example.com,cdn.example.com")
+	t.Setenv("CACHE_S3_BUCKET", "test-bucket")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.AllowedUpstreamGateways) != 2 {
+		t.Fatalf("AllowedUpstreamGateways len = %d, want 2", len(cfg.AllowedUpstreamGateways))
+	}
+	if cfg.AllowedUpstreamGateways[0] != "api.example.com" || cfg.AllowedUpstreamGateways[1] != "cdn.example.com" {
+		t.Fatalf("AllowedUpstreamGateways = %v, want [api.example.com cdn.example.com]", cfg.AllowedUpstreamGateways)
+	}
+}
+
+func TestLoadCSV_TrimsWhitespace(t *testing.T) {
+	t.Setenv("CF_ORIGIN_SECRET", " secret-a , secret-b ")
+	t.Setenv("CACHE_S3_BUCKET", "test-bucket")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.OriginSecrets) != 2 {
+		t.Fatalf("OriginSecrets len = %d, want 2", len(cfg.OriginSecrets))
+	}
+	if cfg.OriginSecrets[0] != "secret-a" || cfg.OriginSecrets[1] != "secret-b" {
+		t.Fatalf("OriginSecrets = %v, want trimmed values", cfg.OriginSecrets)
 	}
 }
