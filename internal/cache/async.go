@@ -2,6 +2,8 @@ package cache
 
 import (
 	"context"
+	"crypto/sha256"
+	"fmt"
 	"io"
 	"log/slog"
 	"sync"
@@ -9,6 +11,13 @@ import (
 
 	"github.com/rayselfs/cloudfront-image-optimize-proxy/internal/metrics"
 )
+
+// keyHash returns the first 12 hex characters of the SHA-256 of key.
+// Used to identify cache keys in logs without exposing path/PII.
+func keyHash(key string) string {
+	sum := sha256.Sum256([]byte(key))
+	return fmt.Sprintf("%x", sum[:6]) // 6 bytes = 12 hex chars
+}
 
 // AsyncPutCache wraps a Cache and executes Put operations in background goroutines.
 // Use Wait to drain in-flight puts during graceful shutdown.
@@ -39,7 +48,7 @@ func (a *AsyncPutCache) Put(_ context.Context, key string, body io.Reader, conte
 	select {
 	case a.sem <- struct{}{}:
 	default:
-		slog.Warn("async cache put dropped: worker pool full", "key", key)
+		slog.Warn("async cache put dropped: worker pool full", "key_hash", keyHash(key))
 		metrics.IncPutError()
 		return nil
 	}
@@ -52,7 +61,7 @@ func (a *AsyncPutCache) Put(_ context.Context, key string, body io.Reader, conte
 		putCtx, cancel := context.WithTimeout(context.Background(), a.timeout)
 		defer cancel()
 		if err := a.inner.Put(putCtx, key, body, contentType); err != nil {
-			slog.Error("async cache put failed", "key", key, "error", err)
+			slog.Error("async cache put failed", "key_hash", keyHash(key), "error", err)
 			metrics.IncPutError()
 		}
 	}()

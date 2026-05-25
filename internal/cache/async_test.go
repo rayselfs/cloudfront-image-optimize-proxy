@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"io"
+	"log/slog"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -127,4 +129,32 @@ func TestWrapAsyncPutDefaults(t *testing.T) {
 	if a.timeout != 30*time.Second {
 		t.Fatalf("timeout = %v, want 30s", a.timeout)
 	}
+}
+
+func TestAsyncPutCacheKeyRedaction(t *testing.T) {
+	// Fill the semaphore so the next Put hits the drop path.
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewTextHandler(&buf, nil))
+	slog.SetDefault(logger)
+	t.Cleanup(func() { slog.SetDefault(slog.Default()) })
+
+	inner := &syncCache{}
+	a := WrapAsyncPut(inner, 1*time.Second, 1)
+
+	// Saturate the pool.
+	a.sem <- struct{}{}
+
+	sensitiveKey := "/private/user/email@example.com/640_webp_75"
+	_ = a.Put(context.Background(), sensitiveKey, bytes.NewReader([]byte("data")), "image/webp")
+
+	logOutput := buf.String()
+	if strings.Contains(logOutput, sensitiveKey) {
+		t.Fatalf("raw key leaked into log: %s", logOutput)
+	}
+	if !strings.Contains(logOutput, "key_hash") {
+		t.Fatalf("key_hash attribute not found in log: %s", logOutput)
+	}
+
+	// Release the semaphore.
+	<-a.sem
 }
