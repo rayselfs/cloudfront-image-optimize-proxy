@@ -25,6 +25,24 @@ hpa:
     #   - type: Percent
     #     value: 10
     #     periodSeconds: 60
+  customMetrics: []
+    # Example custom metric (requires prometheus-adapter or KEDA):
+    # - type: Pods
+    #   pods:
+    #     metric:
+    #       name: http_request_duration_seconds_p95
+    #     target:
+    #       type: AverageValue
+    #       averageValue: "2"
+
+networkPolicy:
+  enabled: false
+  # Ingress from load balancer (NLB) and monitoring scraper
+  ingressFromCIDRs: []
+  #   - 10.0.0.0/8
+  # Egress to S3, imgproxy sidecar, and upstream gateways
+  egressToS3: true
+  egressToDNS: true
 
 podDisruptionBudget:
   enabled: false
@@ -151,3 +169,15 @@ extraManifests: []
 #       - secretKey: CF_ORIGIN_SECRET
 #         remoteRef:
 #           key: /image-optimize-proxy/origin-verify
+
+serviceMonitor:
+  enabled: false
+  namespace: ""          # defaults to release namespace if empty
+  interval: "30s"
+  scrapeTimeout: "10s"
+  labels: {}             # additional labels for ServiceMonitor
+
+prometheusRule:
+  enabled: false
+  namespace: ""          # defaults to release namespace if empty
+  labels: {}             # additional labels for PrometheusRule
