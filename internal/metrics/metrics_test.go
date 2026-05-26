@@ -136,4 +136,3 @@ func TestHistogramLabels(t *testing.T) {
 		}
 	}
 }
-

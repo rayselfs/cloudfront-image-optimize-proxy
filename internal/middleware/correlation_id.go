@@ -50,4 +50,3 @@ func isValidRequestID(id string) bool {
 	}
 	return true
 }
-

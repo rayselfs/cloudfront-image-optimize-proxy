@@ -8,9 +8,9 @@ import (
 
 func TestSecurityHeaders(t *testing.T) {
 	tests := []struct {
-		name           string
-		header         string
-		expectedValue  string
+		name          string
+		header        string
+		expectedValue string
 	}{
 		{
 			name:          "X-Content-Type-Options",

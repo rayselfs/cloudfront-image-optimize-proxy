@@ -67,11 +67,11 @@ func TestBuildURLEscaping(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			got := buildProcessingURL("http://localhost:8081", tc.sourceURL, TransformParams{Width: 800, Format: "webp", Quality: 85})
-			
+
 			if !strings.HasSuffix(got, "/plain/"+tc.wantEncoded) {
 				t.Errorf("got %q, want suffix /plain/%s", got, tc.wantEncoded)
 			}
-			
+
 			plainIdx := strings.Index(got, "/plain/")
 			if plainIdx != -1 && strings.Contains(got[plainIdx+7:], "?") {
 				t.Errorf("raw '?' found after /plain/ in: %s", got)

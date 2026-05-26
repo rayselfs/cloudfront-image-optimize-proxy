@@ -105,7 +105,6 @@ func TestIntegrationImageOptimizationFlow(t *testing.T) {
 		upstream.NewResolver(30*time.Second, nil, nil),
 		coalesce.New(),
 		1920,
-		0,
 		75,
 	)
 
@@ -178,7 +177,6 @@ func TestIntegrationImgproxyFallback(t *testing.T) {
 		upstream.NewResolver(30*time.Second, nil, nil),
 		coalesce.New(),
 		1920,
-		0,
 		75,
 	)
 

@@ -28,12 +28,11 @@ var copyBufPool = sync.Pool{
 
 // Handler is the main image optimization HTTP handler.
 type Handler struct {
-	Cache        cache.FileCache
-	Transformer  imgproxy.Transformer
-	Resolver     upstream.Resolver
-	Coalescer    coalesce.Coalescer
-	MaxWidth     int
-	MaxBodyBytes int64
+	Cache          cache.FileCache
+	Transformer    imgproxy.Transformer
+	Resolver       upstream.Resolver
+	Coalescer      coalesce.Coalescer
+	MaxWidth       int
 	DefaultQuality int
 }
 
@@ -44,15 +43,14 @@ type processResult struct {
 	streamFromCache bool
 }
 
-// New creates a new Handler. maxBodyBytes limits upstream/transform body reads (0 = no limit).
-func New(c cache.FileCache, t imgproxy.Transformer, r upstream.Resolver, coal coalesce.Coalescer, maxWidth int, maxBodyBytes int64, defaultQuality int) *Handler {
+// New creates a new Handler.
+func New(c cache.FileCache, t imgproxy.Transformer, r upstream.Resolver, coal coalesce.Coalescer, maxWidth int, defaultQuality int) *Handler {
 	return &Handler{
 		Cache:          c,
 		Transformer:    t,
 		Resolver:       r,
 		Coalescer:      coal,
 		MaxWidth:       maxWidth,
-		MaxBodyBytes:   maxBodyBytes,
 		DefaultQuality: defaultQuality,
 	}
 }
@@ -121,13 +119,9 @@ func (h *Handler) streamResponse(w http.ResponseWriter, body io.Reader, contentT
 	}
 	w.Header().Set("Cache-Control", "public, max-age=31536000")
 	w.Header().Set("X-Cache", cacheStatus)
-	r := body
-	if h.MaxBodyBytes > 0 {
-		r = io.LimitReader(body, h.MaxBodyBytes)
-	}
 	bufPtr := copyBufPool.Get().(*[]byte)
 	defer copyBufPool.Put(bufPtr)
-	_, _ = io.CopyBuffer(w, r, *bufPtr)
+	_, _ = io.CopyBuffer(w, body, *bufPtr)
 }
 
 func cacheKeyHash(key string) string {
@@ -249,15 +243,9 @@ func (h *Handler) process(r *http.Request, key string, params *ImageParams) (pro
 	}
 	tmpPath := tmpFile.Name()
 
-	var written int64
 	bufPtr := copyBufPool.Get().(*[]byte)
 	defer copyBufPool.Put(bufPtr)
-	if h.MaxBodyBytes > 0 {
-		limited := io.LimitReader(transformedBody, h.MaxBodyBytes+1)
-		written, err = io.CopyBuffer(tmpFile, limited, *bufPtr)
-	} else {
-		written, err = io.CopyBuffer(tmpFile, transformedBody, *bufPtr)
-	}
+	_, err = io.CopyBuffer(tmpFile, transformedBody, *bufPtr)
 	if closeErr := tmpFile.Close(); err == nil {
 		err = closeErr
 	}
@@ -265,10 +253,6 @@ func (h *Handler) process(r *http.Request, key string, params *ImageParams) (pro
 	if err != nil {
 		_ = os.Remove(tmpPath)
 		return processResult{}, fmt.Errorf("handler: write temp file: %w", err)
-	}
-	if h.MaxBodyBytes > 0 && written > h.MaxBodyBytes {
-		_ = os.Remove(tmpPath)
-		return processResult{}, fmt.Errorf("handler: transformed body exceeds %d bytes", h.MaxBodyBytes)
 	}
 
 	bodyBytes, err := os.ReadFile(tmpPath)
@@ -288,18 +272,7 @@ func (h *Handler) process(r *http.Request, key string, params *ImageParams) (pro
 }
 
 func (h *Handler) readBody(r io.Reader) ([]byte, error) {
-	if h.MaxBodyBytes <= 0 {
-		return io.ReadAll(r)
-	}
-	limit := h.MaxBodyBytes + 1
-	data, err := io.ReadAll(io.LimitReader(r, limit))
-	if err != nil {
-		return nil, err
-	}
-	if int64(len(data)) > h.MaxBodyBytes {
-		return nil, fmt.Errorf("response body exceeds %d bytes", h.MaxBodyBytes)
-	}
-	return data, nil
+	return io.ReadAll(r)
 }
 
 func (h *Handler) writeResult(w http.ResponseWriter, result processResult) {

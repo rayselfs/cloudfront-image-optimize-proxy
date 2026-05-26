@@ -129,15 +129,15 @@ func Registry() *prometheus.Registry {
 	return reg
 }
 
-func IncRequest()                { requestsTotal.Inc() }
-func IncCacheHit()               { cacheHits.Inc() }
-func IncCacheMiss()              { cacheMisses.Inc() }
-func IncCacheBypass()            { cacheBypasses.Inc() }
-func IncImgproxyError()          { imgproxyErrors.Inc() }
-func IncPutError()               { putErrors.Inc() }
-func IncAsyncCachePutInflight()  { asyncCachePutInflight.Inc() }
-func DecAsyncCachePutInflight()  { asyncCachePutInflight.Dec() }
-func IncAsyncCachePutDropped()   { asyncCachePutDropped.Inc() }
+func IncRequest()               { requestsTotal.Inc() }
+func IncCacheHit()              { cacheHits.Inc() }
+func IncCacheMiss()             { cacheMisses.Inc() }
+func IncCacheBypass()           { cacheBypasses.Inc() }
+func IncImgproxyError()         { imgproxyErrors.Inc() }
+func IncPutError()              { putErrors.Inc() }
+func IncAsyncCachePutInflight() { asyncCachePutInflight.Inc() }
+func DecAsyncCachePutInflight() { asyncCachePutInflight.Dec() }
+func IncAsyncCachePutDropped()  { asyncCachePutDropped.Inc() }
 
 // Handler returns an HTTP handler that serves Prometheus metrics.
 func Handler() http.Handler {

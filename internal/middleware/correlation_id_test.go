@@ -79,4 +79,3 @@ func TestCorrelationIDInvalidIDRejected(t *testing.T) {
 		t.Errorf("context ID %q != response header ID %q", gotCtxID, respID)
 	}
 }
-

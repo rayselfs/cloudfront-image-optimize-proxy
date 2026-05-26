@@ -15,10 +15,10 @@ import (
 )
 
 type mockS3 struct {
-	getOutput    *s3.GetObjectOutput
-	getErr       error
-	putInput     *s3.PutObjectInput
-	putErr       error
+	getOutput     *s3.GetObjectOutput
+	getErr        error
+	putInput      *s3.PutObjectInput
+	putErr        error
 	headBucketErr error
 }
 

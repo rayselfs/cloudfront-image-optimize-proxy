@@ -199,7 +199,7 @@ func TestPassThrough(t *testing.T) {
 	tx := &mockTransformer{}
 	r := &mockResolver{body: []byte("original"), contentType: "image/png"}
 	coal := &mockCoalescer{}
-	h := New(c, tx, r, coal, 1920, 0, 75)
+	h := New(c, tx, r, coal, 1920, 75)
 
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/image.png", nil)
 	w := httptest.NewRecorder()
@@ -234,7 +234,7 @@ func TestCacheHit(t *testing.T) {
 	tx := &mockTransformer{}
 	r := &mockResolver{}
 	coal := &mockCoalescer{}
-	h := New(c, tx, r, coal, 1920, 0, 75)
+	h := New(c, tx, r, coal, 1920, 75)
 
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/image.png?imwidth=640&f=webp&q=80", nil)
 	w := httptest.NewRecorder()
@@ -260,7 +260,7 @@ func TestCacheMissTransform(t *testing.T) {
 	tx := &mockTransformer{body: []byte("transformed"), contentType: "image/avif"}
 	r := &mockResolver{sourceURL: "https://origin/image.png", body: []byte("original"), contentType: "image/png"}
 	coal := &mockCoalescer{}
-	h := New(c, tx, r, coal, 1920, 0, 75)
+	h := New(c, tx, r, coal, 1920, 75)
 
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/image.png?imwidth=640&f=avif&q=80", nil)
 	w := httptest.NewRecorder()
@@ -296,7 +296,7 @@ func TestCacheMissTransformNoFetch(t *testing.T) {
 		headContentType: "image/png",
 	}
 	coal := &mockCoalescer{}
-	h := New(c, tx, r, coal, 1920, 0, 75)
+	h := New(c, tx, r, coal, 1920, 75)
 
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/img.png?imwidth=640&f=avif&q=80", nil)
 	w := httptest.NewRecorder()
@@ -324,7 +324,7 @@ func TestImgproxyFailure(t *testing.T) {
 	tx := &mockTransformer{err: errors.New("imgproxy down")}
 	r := &mockResolver{sourceURL: "https://origin/image.png", body: []byte("original"), contentType: "image/png"}
 	coal := &mockCoalescer{}
-	h := New(c, tx, r, coal, 1920, 0, 75)
+	h := New(c, tx, r, coal, 1920, 75)
 
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/image.png?imwidth=640&f=webp&q=80", nil)
 	w := httptest.NewRecorder()
@@ -350,7 +350,7 @@ func TestNonImagePassThrough(t *testing.T) {
 	tx := &mockTransformer{}
 	r := &mockResolver{sourceURL: "https://origin/page", body: []byte("<html></html>"), contentType: "text/html", headContentType: "text/html"}
 	coal := &mockCoalescer{}
-	h := New(c, tx, r, coal, 1920, 0, 75)
+	h := New(c, tx, r, coal, 1920, 75)
 
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/page?imwidth=640&f=webp&q=80", nil)
 	w := httptest.NewRecorder()
@@ -373,7 +373,7 @@ func TestMaxWidthCap(t *testing.T) {
 	tx := &mockTransformer{body: []byte("transformed"), contentType: "image/webp"}
 	r := &mockResolver{sourceURL: "https://origin/image.png", body: []byte("original"), contentType: "image/png"}
 	coal := &mockCoalescer{}
-	h := New(c, tx, r, coal, 1920, 0, 75)
+	h := New(c, tx, r, coal, 1920, 75)
 
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/image.png?imwidth=3000&f=webp&q=80", nil)
 	w := httptest.NewRecorder()
@@ -393,7 +393,7 @@ func TestPassThroughResolverError(t *testing.T) {
 	tx := &mockTransformer{}
 	r := &mockResolver{err: errors.New("resolver down")}
 	coal := &mockCoalescer{}
-	h := New(c, tx, r, coal, 1920, 0, 75)
+	h := New(c, tx, r, coal, 1920, 75)
 
 	// No transform params → triggers pass-through path
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/image.png", nil)
@@ -411,7 +411,7 @@ func TestPassThroughFetchError(t *testing.T) {
 	tx := &mockTransformer{}
 	r := &mockResolver{fetchErr: errors.New("upstream unreachable"), contentType: "image/png"}
 	coal := &mockCoalescer{}
-	h := New(c, tx, r, coal, 1920, 0, 75)
+	h := New(c, tx, r, coal, 1920, 75)
 
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/image.png", nil)
 	w := httptest.NewRecorder()
@@ -428,7 +428,7 @@ func TestProcessResolverError(t *testing.T) {
 	tx := &mockTransformer{}
 	r := &mockResolver{err: errors.New("resolve failed")}
 	coal := &mockCoalescer{}
-	h := New(c, tx, r, coal, 1920, 0, 75)
+	h := New(c, tx, r, coal, 1920, 75)
 
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/image.png?imwidth=640&f=webp&q=80", nil)
 	w := httptest.NewRecorder()
@@ -445,7 +445,7 @@ func TestProcessFetchError(t *testing.T) {
 	tx := &mockTransformer{}
 	r := &mockResolver{fetchErr: errors.New("upstream unreachable"), sourceURL: "https://origin/image.png", contentType: "image/png"}
 	coal := &mockCoalescer{}
-	h := New(c, tx, r, coal, 1920, 0, 75)
+	h := New(c, tx, r, coal, 1920, 75)
 
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/image.png?imwidth=640&f=webp&q=80", nil)
 	w := httptest.NewRecorder()
@@ -462,7 +462,7 @@ func TestCachePutFileError(t *testing.T) {
 	tx := &mockTransformer{body: []byte("transformed"), contentType: "image/webp"}
 	r := &mockResolver{sourceURL: "https://origin/image.png", body: []byte("original"), contentType: "image/png"}
 	coal := &mockCoalescer{}
-	h := New(c, tx, r, coal, 1920, 0, 75)
+	h := New(c, tx, r, coal, 1920, 75)
 
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/image.png?imwidth=640&f=webp&q=80", nil)
 	w := httptest.NewRecorder()
@@ -480,30 +480,12 @@ func TestCachePutFileError(t *testing.T) {
 	}
 }
 
-func TestMaxBodyBytesExceeded(t *testing.T) {
-	c := &mockCache{getErr: cache.ErrNotFound}
-	tx := &mockTransformer{body: []byte("big transformed body"), contentType: "image/webp"}
-	r := &mockResolver{sourceURL: "https://origin/image.png", body: []byte("original body"), contentType: "image/png", headContentType: "image/png"}
-	coal := &mockCoalescer{}
-	// Set limit to 5 bytes — original body "original body" exceeds it.
-	h := New(c, tx, r, coal, 1920, 5, 75)
-
-	req := httptest.NewRequest(http.MethodGet, "https://example.com/image.png?imwidth=640&f=webp&q=80", nil)
-	w := httptest.NewRecorder()
-
-	h.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want %d (body exceeded limit)", w.Code, http.StatusBadGateway)
-	}
-}
-
 func TestPassThroughUnderLimit(t *testing.T) {
 	c := &mockCache{}
 	tx := &mockTransformer{}
 	r := &mockResolver{body: []byte("12345678"), contentType: "image/png"}
 	coal := &mockCoalescer{}
-	h := New(c, tx, r, coal, 1920, 10, 75)
+	h := New(c, tx, r, coal, 1920, 75)
 
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/image.png", nil)
 	w := httptest.NewRecorder()
@@ -527,7 +509,7 @@ func TestPassThroughOverLimit(t *testing.T) {
 	tx := &mockTransformer{}
 	r := &mockResolver{body: []byte("original body"), contentType: "image/png"}
 	coal := &mockCoalescer{}
-	h := New(c, tx, r, coal, 1920, 5, 75)
+	h := New(c, tx, r, coal, 1920, 75)
 
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/image.png", nil)
 	w := httptest.NewRecorder()
@@ -548,7 +530,7 @@ func TestPassThroughCRLFContentType(t *testing.T) {
 	tx := &mockTransformer{}
 	r := &mockResolver{body: []byte("data"), contentType: "image/png\r\nX-Injected: evil"}
 	coal := &mockCoalescer{}
-	h := New(c, tx, r, coal, 1920, 0, 75)
+	h := New(c, tx, r, coal, 1920, 75)
 
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/image.png", nil)
 	w := httptest.NewRecorder()
@@ -568,7 +550,7 @@ func TestTransformNonImageContentType(t *testing.T) {
 	tx := &mockTransformer{body: []byte("not-an-image"), contentType: "text/html"}
 	r := &mockResolver{sourceURL: "https://origin/img.png", body: []byte("original"), contentType: "image/png"}
 	coal := &mockCoalescer{}
-	h := New(c, tx, r, coal, 1920, 0, 75)
+	h := New(c, tx, r, coal, 1920, 75)
 
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/img.png?imwidth=640&f=webp&q=80", nil)
 	w := httptest.NewRecorder()
@@ -591,7 +573,7 @@ func TestCacheGetNonMissError(t *testing.T) {
 	tx := &mockTransformer{body: []byte("transformed"), contentType: "image/webp"}
 	r := &mockResolver{sourceURL: "https://origin/image.png", body: []byte("original"), contentType: "image/png"}
 	coal := &mockCoalescer{}
-	h := New(c, tx, r, coal, 1920, 0, 75)
+	h := New(c, tx, r, coal, 1920, 75)
 
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/image.png?imwidth=640&f=webp&q=80", nil)
 	w := httptest.NewRecorder()
@@ -614,7 +596,7 @@ func TestTempFileRemovedOnSuccess(t *testing.T) {
 	tx := &mockTransformer{body: bytes.Repeat([]byte("x"), 1024), contentType: "image/avif"}
 	r := &mockResolver{sourceURL: "https://origin/img.png", contentType: "image/avif", headContentType: "image/avif"}
 	coal := &mockCoalescer{}
-	h := New(c, tx, r, coal, 1920, 10*1024*1024, 75)
+	h := New(c, tx, r, coal, 1920, 75)
 
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/img.png?imwidth=640&f=avif&q=80", nil)
 	w := httptest.NewRecorder()
@@ -631,30 +613,6 @@ func TestTempFileRemovedOnSuccess(t *testing.T) {
 	}
 }
 
-func TestTempFileRemovedOnOverLimit(t *testing.T) {
-	before, _ := filepath.Glob(os.TempDir() + "/image-optimize-proxy-*")
-
-	c := &mockCache{getErr: cache.ErrNotFound}
-	tx := &mockTransformer{body: bytes.Repeat([]byte("x"), 20), contentType: "image/avif"}
-	r := &mockResolver{sourceURL: "https://origin/img.png", contentType: "image/avif", headContentType: "image/avif"}
-	coal := &mockCoalescer{}
-	h := New(c, tx, r, coal, 1920, 5, 75)
-
-	req := httptest.NewRequest(http.MethodGet, "https://example.com/img.png?imwidth=640&f=avif&q=80", nil)
-	w := httptest.NewRecorder()
-	h.ServeHTTP(w, req)
-
-	if w.Code != http.StatusBadGateway {
-		t.Fatalf("status = %d, want 502 (over limit)", w.Code)
-	}
-
-	after, _ := filepath.Glob(os.TempDir() + "/image-optimize-proxy-*")
-	newFiles := len(after) - len(before)
-	if newFiles != 0 {
-		t.Fatalf("temp files leaked: %d new file(s) found", newFiles)
-	}
-}
-
 func TestStatusForwarding(t *testing.T) {
 	c := &mockCache{getErr: cache.ErrNotFound}
 	tx := &mockTransformer{}
@@ -662,7 +620,7 @@ func TestStatusForwarding(t *testing.T) {
 		err: &upstream.StatusError{Code: http.StatusNotFound},
 	}
 	coal := &mockCoalescer{}
-	h := New(c, tx, r, coal, 1920, 0, 75)
+	h := New(c, tx, r, coal, 1920, 75)
 
 	req := httptest.NewRequest(http.MethodGet, "https://example.com/image.png?imwidth=640&f=webp&q=80", nil)
 	w := httptest.NewRecorder()
