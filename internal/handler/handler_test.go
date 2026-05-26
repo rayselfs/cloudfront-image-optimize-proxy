@@ -522,6 +522,7 @@ func TestPassThroughUnderLimit(t *testing.T) {
 }
 
 func TestPassThroughOverLimit(t *testing.T) {
+	// Pass-through should stream successfully even if the file size exceeds MaxBodyBytes
 	c := &mockCache{}
 	tx := &mockTransformer{}
 	r := &mockResolver{body: []byte("original body"), contentType: "image/png"}
@@ -533,8 +534,11 @@ func TestPassThroughOverLimit(t *testing.T) {
 
 	h.ServeHTTP(w, req)
 
-	if w.Code != http.StatusRequestEntityTooLarge {
-		t.Fatalf("status = %d, want %d", w.Code, http.StatusRequestEntityTooLarge)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", w.Code, http.StatusOK)
+	}
+	if got := w.Body.String(); got != "original body" {
+		t.Fatalf("body = %q, want %q", got, "original body")
 	}
 }
 

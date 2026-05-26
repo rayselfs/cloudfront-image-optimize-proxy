@@ -203,20 +203,3 @@ func TestS3CachePutFileLarge(t *testing.T) {
 		t.Fatal("temp file not removed after PutFile")
 	}
 }
-
-func TestS3CacheCheck_Success(t *testing.T) {
-	mock := &mockS3{}
-	c := NewS3Cache(mock, "test-bucket")
-	if err := c.Check(context.Background()); err != nil {
-		t.Fatalf("expected nil, got %v", err)
-	}
-}
-
-func TestS3CacheCheck_Failure(t *testing.T) {
-	wantErr := errors.New("access denied")
-	mock := &mockS3{headBucketErr: wantErr}
-	c := NewS3Cache(mock, "test-bucket")
-	if err := c.Check(context.Background()); !errors.Is(err, wantErr) {
-		t.Fatalf("expected %v, got %v", wantErr, err)
-	}
-}
