@@ -2,17 +2,15 @@ trigger:
   branches:
     include:
       - main
-      - feat/image-optimize-proxy
-  paths:
+  tags:
     include:
-      - packages/image-optimize-proxy/**
+      - v*.*.*
 
 pool:
   name: "Default"
 
 variables:
   GO_VERSION: "1.25"
-  WORKING_DIR: "packages/image-optimize-proxy"
   REPOSITORY: ops/image-optimize-proxy
 
 resources:
@@ -23,7 +21,7 @@ resources:
 
 stages:
   - stage: CI
-    displayName: "Build & Test"
+    displayName: "Test"
     jobs:
       - job: Test
         displayName: "Go Build & Test"
@@ -33,29 +31,125 @@ stages:
             inputs:
               version: "$(GO_VERSION)"
 
-          - script: |
-              go vet ./...
+          - script: go vet ./...
             displayName: "Go Vet"
-            workingDirectory: $(WORKING_DIR)
 
-          - script: |
-              go test ./... -v -cover -coverprofile=coverage.out
+          - script: go test ./... -v -cover -coverprofile=coverage.out
             displayName: "Go Test"
-            workingDirectory: $(WORKING_DIR)
 
+  - stage: Docker
+    displayName: "Build & Push Docker Image"
+    dependsOn: CI
+    condition: |
+      and(
+        succeeded(),
+        or(
+          eq(variables['Build.SourceBranch'], 'refs/heads/main'),
+          startsWith(variables['Build.SourceBranch'], 'refs/tags/v')
+        )
+      )
+    jobs:
       - job: Build
-        displayName: "Build Image"
-        dependsOn: Test
-        condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
+        displayName: "Build & Push"
         steps:
-          - script: |
-              IMAGE_TAG="$(git rev-parse --short HEAD)"
-              echo "##vso[task.setvariable variable=IMAGE_TAG]$IMAGE_TAG"
-            displayName: "Set image tag"
+          - bash: |
+              set -euo pipefail
+              if [[ "$(Build.SourceBranch)" == refs/tags/v* ]]; then
+                VERSION="${BUILD_SOURCEBRANCHNAME#v}"
+              else
+                VERSION="$(git rev-parse --short HEAD)"
+              fi
+              echo "Image tag: $VERSION"
+              echo "##vso[task.setvariable variable=IMAGE_TAG]$VERSION"
+            displayName: "Resolve image tag"
+
           - template: templates/docker-build-v2.yaml@ops-pipelines
             parameters:
-              dockerfile: packages/image-optimize-proxy/Dockerfile
-              build_context: packages/image-optimize-proxy
+              dockerfile: Dockerfile
+              build_context: "."
               repository: $(REPOSITORY)
               image_tag: $(IMAGE_TAG)
               multi_platform: true
+
+  - stage: HelmPublish
+    displayName: "Publish Helm Chart"
+    dependsOn: Docker
+    condition: |
+      and(
+        succeeded(),
+        startsWith(variables['Build.SourceBranch'], 'refs/tags/v')
+      )
+    jobs:
+      - job: Publish
+        displayName: "Lint, Validate & Push chart"
+        variables:
+          CHART_DIR: charts/image-optimize-proxy
+          CHART_NAME: image-optimize-proxy
+        steps:
+          - checkout: self
+            fetchDepth: 0
+            clean: true
+
+          - bash: |
+              set -euo pipefail
+              chart_dir="$(CHART_DIR)"
+              chart="$(CHART_NAME)"
+
+              required_files="Chart.yaml values.yaml README.md .helmignore"
+              required_fields="apiVersion name description type version home sources maintainers icon annotations kubeVersion"
+
+              errors=""
+              for f in $required_files; do
+                [ -f "$chart_dir/$f" ] || errors="$errors\n  missing file: $f"
+              done
+              for field in $required_fields; do
+                grep -q "^$field:" "$chart_dir/Chart.yaml" 2>/dev/null || errors="$errors\n  missing Chart.yaml field: $field"
+              done
+
+              if [ -n "$errors" ]; then
+                printf "Structure check failed for %s:%b\n" "$chart" "$errors"
+                exit 1
+              fi
+              echo "Structure check passed for $chart"
+            displayName: "Validate chart structure"
+
+          - bash: |
+              set -euo pipefail
+              helm lint "$(CHART_DIR)" \
+                --set config.cacheS3Bucket=lint-bucket \
+                --set config.allowedUpstreamGateways=https://example.com \
+                --set config.allowedSourceBuckets=source-bucket
+            displayName: "Lint"
+
+          - bash: |
+              set -euo pipefail
+              helm template test-release "$(CHART_DIR)" --dry-run \
+                --set config.cacheS3Bucket=lint-bucket \
+                --set config.allowedUpstreamGateways=https://example.com \
+                --set config.allowedSourceBuckets=source-bucket \
+                > /dev/null
+              echo "Template validation passed"
+            displayName: "Validate templates"
+
+          - bash: |
+              set -euo pipefail
+              CHARTMUSEUM_URL="https://vr-ops-internal-chartmuseum.vrprod.viveport.com"
+              VERSION="${BUILD_SOURCEBRANCHNAME#v}"
+              CHART="$(CHART_NAME)"
+
+              http_status=$(curl -s -o /dev/null -w "%{http_code}" \
+                "$CHARTMUSEUM_URL/api/charts/$CHART/$VERSION")
+              if [ "$http_status" = "200" ]; then
+                echo "⏭️  $CHART-$VERSION already exists in ChartMuseum, skipping."
+                exit 0
+              fi
+
+              helm package "$(CHART_DIR)" \
+                --version "$VERSION" \
+                --app-version "$VERSION"
+
+              curl --fail --data-binary "@$CHART-${VERSION}.tgz" \
+                "$CHARTMUSEUM_URL/api/charts"
+              echo "✅ Published $CHART-$VERSION to ChartMuseum"
+              rm -f "$CHART-${VERSION}.tgz"
+            displayName: "Package & publish to ChartMuseum"
