@@ -57,7 +57,7 @@ stages:
               if [[ "$(Build.SourceBranch)" == refs/tags/v* ]]; then
                 VERSION="${BUILD_SOURCEBRANCHNAME#v}"
               else
-                VERSION="$(git rev-parse --short HEAD)"
+                VERSION="latest"
               fi
               echo "Image tag: $VERSION"
               echo "##vso[task.setvariable variable=IMAGE_TAG]$VERSION"
