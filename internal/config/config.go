@@ -14,13 +14,11 @@ const (
 	defaultImgproxyURL             = "http://localhost:8081"
 	defaultCacheS3Region           = "us-west-2"
 	defaultMaxWidth                = 1920
-	defaultMaxBodyBytes            = 20 * 1024 * 1024 // 20 MB
 	defaultUpstreamTimeout         = 30 * time.Second
 	defaultImgproxyTimeout         = 30 * time.Second
 	defaultShutdownTimeout         = 25 * time.Second
 	defaultAsyncCachePutConcurrency = 32
 	defaultAsyncCachePutTimeout     = 30 * time.Second
-	defaultMultipartThresholdBytes int64 = 5 * 1024 * 1024 // 5 MiB
 	defaultQuality                 = 75
 )
 
@@ -31,7 +29,6 @@ type Config struct {
 	CacheS3Bucket               string
 	CacheS3Region               string
 	MaxWidth                    int
-	MaxBodyBytes                int64
 	UpstreamTimeout             time.Duration
 	ImgproxyTimeout             time.Duration
 	ShutdownTimeout             time.Duration
@@ -40,20 +37,12 @@ type Config struct {
 	OriginSecrets               []string
 	AllowedUpstreamGateways     []string
 	AllowedSourceBuckets        []string
-	AllowAllUpstreamGateways    bool
-	AllowAllSourceBuckets       bool
-	MultipartThresholdBytes     int64
 	DefaultQuality              int
 }
 
 // Load reads service configuration from environment variables.
 func Load() (*Config, error) {
 	maxWidth, err := loadPositiveInt("MAX_WIDTH", defaultMaxWidth)
-	if err != nil {
-		return nil, err
-	}
-
-	maxBodyBytes, err := loadPositiveInt64("MAX_BODY_BYTES", defaultMaxBodyBytes)
 	if err != nil {
 		return nil, err
 	}
@@ -83,11 +72,6 @@ func Load() (*Config, error) {
 		return nil, err
 	}
 
-	multipartThreshold, err := loadPositiveInt64("S3_MULTIPART_THRESHOLD_BYTES", defaultMultipartThresholdBytes)
-	if err != nil {
-		return nil, err
-	}
-
 	defaultQualityVal, err := loadPositiveInt("DEFAULT_QUALITY", defaultQuality)
 	if err != nil {
 		return nil, err
@@ -99,7 +83,6 @@ func Load() (*Config, error) {
 		CacheS3Bucket:               strings.TrimSpace(os.Getenv("CACHE_S3_BUCKET")),
 		CacheS3Region:               envOrDefault("CACHE_S3_REGION", defaultCacheS3Region),
 		MaxWidth:                    maxWidth,
-		MaxBodyBytes:                maxBodyBytes,
 		UpstreamTimeout:             upstreamTimeout,
 		ImgproxyTimeout:             imgproxyTimeout,
 		ShutdownTimeout:             shutdownTimeout,
@@ -108,9 +91,6 @@ func Load() (*Config, error) {
 		OriginSecrets:               loadCSV("CF_ORIGIN_SECRET"),
 		AllowedUpstreamGateways:     loadCSV("ALLOWED_UPSTREAM_GATEWAYS"),
 		AllowedSourceBuckets:        loadCSV("ALLOWED_SOURCE_BUCKETS"),
-		AllowAllUpstreamGateways:    loadBool("ALLOW_ALL_UPSTREAM_GATEWAYS"),
-		AllowAllSourceBuckets:       loadBool("ALLOW_ALL_SOURCE_BUCKETS"),
-		MultipartThresholdBytes:     multipartThreshold,
 		DefaultQuality:              defaultQualityVal,
 	}
 
@@ -206,11 +186,11 @@ func loadBool(name string) bool {
 // Validate checks that allowlists are configured or explicitly opted out,
 // and validates ImgproxyURL is a valid HTTP URL.
 func (c *Config) Validate() error {
-	if len(c.AllowedUpstreamGateways) == 0 && !c.AllowAllUpstreamGateways {
-		return fmt.Errorf("ALLOWED_UPSTREAM_GATEWAYS is empty; set it or set ALLOW_ALL_UPSTREAM_GATEWAYS=true to permit all")
+	if len(c.AllowedUpstreamGateways) == 0 {
+		return fmt.Errorf("ALLOWED_UPSTREAM_GATEWAYS is empty; configuration is required")
 	}
-	if len(c.AllowedSourceBuckets) == 0 && !c.AllowAllSourceBuckets {
-		return fmt.Errorf("ALLOWED_SOURCE_BUCKETS is empty; set it or set ALLOW_ALL_SOURCE_BUCKETS=true to permit all")
+	if len(c.AllowedSourceBuckets) == 0 {
+		return fmt.Errorf("ALLOWED_SOURCE_BUCKETS is empty; configuration is required")
 	}
 
 	if _, err := url.ParseRequestURI(c.ImgproxyURL); err != nil || !strings.HasPrefix(c.ImgproxyURL, "http") {

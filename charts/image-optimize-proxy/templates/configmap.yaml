@@ -15,16 +15,10 @@ data:
   SHUTDOWN_TIMEOUT: {{ .Values.config.shutdownTimeout | quote }}
   ASYNC_CACHE_PUT_CONCURRENCY: {{ .Values.config.asyncCachePutConcurrency | quote }}
   ASYNC_CACHE_PUT_TIMEOUT_SECONDS: {{ .Values.config.asyncCachePutTimeoutSeconds | quote }}
-  {{- if .Values.config.maxBodyBytes }}
-  MAX_BODY_BYTES: {{ .Values.config.maxBodyBytes | quote }}
-  {{- end }}
   {{- if .Values.config.allowedUpstreamGateways }}
   ALLOWED_UPSTREAM_GATEWAYS: {{ .Values.config.allowedUpstreamGateways | quote }}
   {{- end }}
   {{- if .Values.config.allowedSourceBuckets }}
   ALLOWED_SOURCE_BUCKETS: {{ .Values.config.allowedSourceBuckets | quote }}
   {{- end }}
-  ALLOW_ALL_UPSTREAM_GATEWAYS: {{ .Values.config.allowAllUpstreamGateways | quote }}
-  ALLOW_ALL_SOURCE_BUCKETS: {{ .Values.config.allowAllSourceBuckets | quote }}
-  S3_MULTIPART_THRESHOLD_BYTES: {{ .Values.config.s3MultipartThresholdBytes | quote }}
   DEFAULT_QUALITY: {{ .Values.config.defaultQuality | quote }}
