@@ -83,8 +83,8 @@ stages:
       - job: Publish
         displayName: "Lint, Validate & Push chart"
         variables:
-          CHART_DIR: charts/image-optimize-proxy
-          CHART_NAME: image-optimize-proxy
+          CHART_DIR: charts/cf-image-optimize-proxy
+          CHART_NAME: cf-image-optimize-proxy
         steps:
           - checkout: self
             fetchDepth: 0

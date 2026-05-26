@@ -1,4 +1,4 @@
-# image-optimize-proxy Helm Chart
+# cf-image-optimize-proxy Helm Chart
 
 Helm chart for deploying the image-optimize-proxy with an imgproxy sidecar on Kubernetes (EKS).
 
@@ -16,7 +16,7 @@ The chart is published to GitHub Container Registry on every version tag.
 
 ```bash
 helm install image-optimize-proxy \
-  oci://ghcr.io/rayselfs/charts/image-optimize-proxy \
+  oci://ghcr.io/rayselfs/charts/cf-image-optimize-proxy \
   --version <chart-version> \
   --set image.repository=ghcr.io/rayselfs/image-optimize-proxy \
   --set image.tag=<app-version> \
@@ -28,7 +28,7 @@ helm install image-optimize-proxy \
 ### From local source
 
 ```bash
-helm install image-optimize-proxy ./charts/image-optimize-proxy \
+helm install image-optimize-proxy ./charts/cf-image-optimize-proxy \
   --set image.repository=ghcr.io/rayselfs/image-optimize-proxy \
   --set image.tag=<app-version> \
   --set config.cacheS3Bucket=my-image-cache-bucket \
@@ -39,7 +39,7 @@ helm install image-optimize-proxy ./charts/image-optimize-proxy \
 
 ```bash
 helm upgrade image-optimize-proxy \
-  oci://ghcr.io/rayselfs/charts/image-optimize-proxy \
+  oci://ghcr.io/rayselfs/charts/cf-image-optimize-proxy \
   --version <new-chart-version> \
   --reuse-values \
   --set image.tag=<new-app-version>
@@ -104,7 +104,7 @@ version via job outputs and stamps it into the chart with `--app-version`.
 ### Published artifact
 
 ```
-oci://ghcr.io/rayselfs/charts/image-optimize-proxy:<chart-version>
+oci://ghcr.io/rayselfs/charts/cf-image-optimize-proxy:<chart-version>
 ```
 
 The OCI registry is GHCR. Authentication uses the built-in `GITHUB_TOKEN` — no additional secrets
@@ -130,13 +130,13 @@ are required.
 # 4. Package the chart, injecting version + appVersion
 - name: Package Helm chart
   run: |
-    helm package charts/image-optimize-proxy \
+    helm package charts/cf-image-optimize-proxy \
       --version "${{ steps.version.outputs.version }}" \
       --app-version "${{ needs.docker.outputs.image-version }}"
 
 # 5. Push the .tgz to GHCR OCI registry
 - name: Push Helm chart to GHCR
-  run: helm push image-optimize-proxy-*.tgz oci://ghcr.io/rayselfs/charts
+  run: helm push cf-image-optimize-proxy-*.tgz oci://ghcr.io/rayselfs/charts
 ```
 
 ### Permissions
@@ -155,7 +155,7 @@ If the repository is private, authenticate before pulling:
 
 ```bash
 echo "$CR_PAT" | helm registry login ghcr.io --username <github-username> --password-stdin
-helm pull oci://ghcr.io/rayselfs/charts/image-optimize-proxy --version <chart-version>
+helm pull oci://ghcr.io/rayselfs/charts/cf-image-optimize-proxy --version <chart-version>
 ```
 
 `CR_PAT` is a GitHub Personal Access Token with `read:packages` scope.

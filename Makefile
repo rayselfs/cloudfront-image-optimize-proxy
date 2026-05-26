@@ -13,7 +13,7 @@ test-helm:
 		echo "Installing helm-unittest plugin..."; \
 		helm plugin install https://github.com/helm-unittest/helm-unittest.git; \
 	fi
-	helm unittest charts/image-optimize-proxy
+	helm unittest charts/cf-image-optimize-proxy
 
 lint:
 	go vet ./...

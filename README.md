@@ -105,7 +105,7 @@ Minimum IAM policy for the cache bucket:
 ### Install from local chart
 
 ```bash
-helm install image-optimize-proxy ./charts/image-optimize-proxy \
+helm install image-optimize-proxy ./charts/cf-image-optimize-proxy \
   --set image.repository=ghcr.io/{owner}/image-optimize-proxy \
   --set image.tag={version} \
   --set config.cacheS3Bucket=my-image-cache-bucket \
@@ -117,7 +117,7 @@ helm install image-optimize-proxy ./charts/image-optimize-proxy \
 
 ```bash
 helm install image-optimize-proxy \
-  oci://ghcr.io/{owner}/charts/image-optimize-proxy \
+  oci://ghcr.io/{owner}/charts/cf-image-optimize-proxy \
   --version {version} \
   --set image.repository=ghcr.io/{owner}/image-optimize-proxy \
   --set image.tag={version} \
@@ -128,7 +128,7 @@ helm install image-optimize-proxy \
 
 Key Helm values: `config.cacheS3Bucket`, `config.cacheS3Region`, `image.repository`, `image.tag`,
 `serviceAccount.roleArn`. See
-[`charts/image-optimize-proxy/values.yaml`](charts/image-optimize-proxy/values.yaml) for the full
+[`charts/cf-image-optimize-proxy/values.yaml`](charts/cf-image-optimize-proxy/values.yaml) for the full
 reference.
 
 The chart creates an internal AWS NLB via `service.beta.kubernetes.io/aws-load-balancer-*`
@@ -140,4 +140,4 @@ annotations. **IRSA** (IAM Roles for Service Accounts) is required for S3 access
 | Artifact | Registry |
 |---|---|
 | Docker image | `ghcr.io/{owner}/image-optimize-proxy:{tag}` |
-| Helm chart | `oci://ghcr.io/{owner}/charts/image-optimize-proxy:{version}` |
+| Helm chart | `oci://ghcr.io/{owner}/charts/cf-image-optimize-proxy:{version}` |

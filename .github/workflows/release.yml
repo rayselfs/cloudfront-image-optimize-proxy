@@ -79,11 +79,11 @@ jobs:
 
       - name: Package Helm chart
         run: |
-          helm package charts/image-optimize-proxy \
+          helm package charts/cf-image-optimize-proxy \
             --version "${{ steps.version.outputs.version }}" \
             --app-version "${{ needs.docker.outputs.image-version }}"
 
       - name: Push Helm chart to GHCR
         run: |
-          helm push image-optimize-proxy-*.tgz \
+          helm push cf-image-optimize-proxy-*.tgz \
             oci://ghcr.io/${{ github.repository_owner }}/charts

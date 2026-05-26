@@ -26,7 +26,7 @@ reaches the proxy, and injects `X-Img-Source-Type` / `X-Img-Source-Bucket` /
 - **Key dependencies**: `aws-sdk-go-v2` (S3 cache + presign), `golang.org/x/sync` (coalescing)
 - **Image processing**: imgproxy sidecar (`darthsim/imgproxy`) at `http://localhost:8081`
 - **Cache backend**: AWS S3
-- **Deployment**: Kubernetes via Helm chart (`charts/image-optimize-proxy/`)
+- **Deployment**: Kubernetes via Helm chart (`charts/cf-image-optimize-proxy/`)
 - **Container**: Multi-stage Docker build → `distroless/static-debian12:nonroot`
 - **CI (Azure DevOps)**: `azure-pipelines.yml`
 - **CI (GitHub)**: `.github/workflows/ci.yml` (PR checks), `.github/workflows/release.yml` (build/publish)
@@ -44,7 +44,7 @@ internal/
   upstream/resolver.go           # Source resolver: S3 presign OR upstream gateway fetch
   coalesce/coalesce.go           # Request coalescing — dedup inflight transforms by cache key
   middleware/logging.go          # Structured JSON logging middleware
-charts/image-optimize-proxy/     # Helm chart for Kubernetes deployment
+charts/cf-image-optimize-proxy/     # Helm chart for Kubernetes deployment
 docs/architecture.md             # CloudFront ↔ proxy contract (cache key, format negotiation)
 ```
 

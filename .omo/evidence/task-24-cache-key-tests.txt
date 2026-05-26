@@ -1,4 +1,0 @@
-=== RUN   TestKeyFromRequest
---- PASS: TestKeyFromRequest (0.00s)
-PASS
-ok  	github.com/rayselfs/cloudfront-image-optimize-proxy/internal/cache	(cached)

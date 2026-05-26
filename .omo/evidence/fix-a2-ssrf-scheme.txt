@@ -1,8 +1,0 @@
-Test run: go test ./internal/upstream/... -v -race
-All 22 tests PASS including:
-  TestResolveGatewayFTPSchemeRejected  PASS
-  TestResolveGatewayFileSchemeRejected PASS
-  TestResolveGatewayHTTPSAllowed       PASS
-  TestResolveGatewaySchemeAdded        PASS (existing - scheme-less still works)
-
-Note: internal/middleware build failure is pre-existing (undefined: isValidRequestID), unrelated to this change.

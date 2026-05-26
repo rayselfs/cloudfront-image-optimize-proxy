@@ -40,4 +40,4 @@ Thumbs.db
 
 # Agent tool state
 .sisyphus/run-continuation/
-.omo/run-continuation/
+.omo/
