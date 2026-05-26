@@ -132,8 +132,8 @@ config:
   imgproxyUrl: "http://localhost:8081"
   asyncCachePutConcurrency: "32"
   asyncCachePutTimeoutSeconds: "30"
-  allowedUpstreamGateways: ""
-  allowedSourceBuckets: ""  # comma-separated
+  allowedUpstreamGateways: ""  # required; comma-separated; server refuses to start if empty
+  allowedSourceBuckets: ""    # required; comma-separated; server refuses to start if empty
   defaultQuality: "75"
 
 originVerify:
