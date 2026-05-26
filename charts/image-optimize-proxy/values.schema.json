@@ -23,6 +23,14 @@
         }
       },
       "required": ["cacheS3Bucket", "allowedUpstreamGateways", "allowedSourceBuckets"]
+    },
+    "originVerify": {
+      "type": "object",
+      "properties": {
+        "secretName": {
+          "type": "string"
+        }
+      }
     }
   },
   "required": ["config"]

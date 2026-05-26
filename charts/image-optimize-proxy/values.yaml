@@ -116,6 +116,10 @@ service:
     service.beta.kubernetes.io/aws-load-balancer-type: external
     service.beta.kubernetes.io/aws-load-balancer-scheme: internal
     service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+    # VPC Origin requires a security group on the NLB so CloudFront's service-managed
+    # ENI can reach it. Override per environment with the SG that allows inbound port 80
+    # from the CloudFront VPC Origins managed prefix list (pl-*).
+    # service.beta.kubernetes.io/aws-load-balancer-security-groups: sg-xxxxxxxxxxxxxxxxx
 
 config:
   listenAddr: ":8080"
