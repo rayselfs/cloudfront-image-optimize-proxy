@@ -4,19 +4,22 @@ import (
 	"context"
 	"errors"
 	"io"
+	"os"
 	"strings"
 	"testing"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/feature/s3/manager"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/aws-sdk-go-v2/service/s3/types"
 )
 
 type mockS3 struct {
-	getOutput *s3.GetObjectOutput
-	getErr    error
-	putInput  *s3.PutObjectInput
-	putErr    error
+	getOutput     *s3.GetObjectOutput
+	getErr        error
+	putInput      *s3.PutObjectInput
+	putErr        error
+	headBucketErr error
 }
 
 func (m *mockS3) GetObject(_ context.Context, params *s3.GetObjectInput, _ ...func(*s3.Options)) (*s3.GetObjectOutput, error) {
@@ -28,6 +31,10 @@ func (m *mockS3) PutObject(_ context.Context, params *s3.PutObjectInput, _ ...fu
 	return &s3.PutObjectOutput{}, m.putErr
 }
 
+func (m *mockS3) HeadBucket(_ context.Context, _ *s3.HeadBucketInput, _ ...func(*s3.Options)) (*s3.HeadBucketOutput, error) {
+	return &s3.HeadBucketOutput{}, m.headBucketErr
+}
+
 func TestKeyFromRequest(t *testing.T) {
 	tests := []struct {
 		host   string
@@ -35,9 +42,22 @@ func TestKeyFromRequest(t *testing.T) {
 		params ImageParams
 		want   string
 	}{
+		// Existing cases
 		{"stream.viverse.com", "/assets/hero", ImageParams{640, "webp", 75}, "stream.viverse.com/assets/hero/640_webp_75"},
 		{"stream.viverse.com", "assets/hero", ImageParams{640, "webp", 75}, "stream.viverse.com/assets/hero/640_webp_75"},
 		{"example.com", "/img/logo.png", ImageParams{320, "jpeg", 90}, "example.com/img/logo.png/320_jpeg_90"},
+
+		// Edge cases: document cache key format invariant {host}/{path}/{width}_{format}_{quality}
+		// Root path: leading / is trimmed, resulting in empty path segment
+		{"example.com", "/", ImageParams{640, "webp", 75}, "example.com//640_webp_75"},
+		// Host with port: port is included in the key (part of host)
+		{"example.com:8080", "/images/photo.jpg", ImageParams{960, "avif", 80}, "example.com:8080/images/photo.jpg/960_avif_80"},
+		// Percent-encoded path: preserved as-is (not decoded by KeyFromRequest)
+		{"cdn.example.com", "/images%2Ffoo.jpg", ImageParams{320, "jpeg", 85}, "cdn.example.com/images%2Ffoo.jpg/320_jpeg_85"},
+		// Path with spaces: preserved as-is in the key
+		{"example.com", "/my image.jpg", ImageParams{640, "webp", 75}, "example.com/my image.jpg/640_webp_75"},
+		// Normal case with all params: demonstrates full format
+		{"example.com", "/assets/banner.png", ImageParams{1280, "webp", 90}, "example.com/assets/banner.png/1280_webp_90"},
 	}
 	for _, tt := range tests {
 		got := KeyFromRequest(tt.host, tt.path, tt.params)
@@ -94,5 +114,92 @@ func TestCachePut(t *testing.T) {
 	}
 	if aws.ToString(mock.putInput.CacheControl) != "public, max-age=31536000" {
 		t.Errorf("cacheControl = %q, want %q", aws.ToString(mock.putInput.CacheControl), "public, max-age=31536000")
+	}
+}
+
+func TestS3CachePutInvalidContentType(t *testing.T) {
+	mock := &mockS3{}
+	c := NewS3Cache(mock, "test-bucket")
+	err := c.Put(context.Background(), "some/key", strings.NewReader("data"), "image/png\r\nX-Bad: 1")
+	if err == nil {
+		t.Fatal("expected error for CRLF content type, got nil")
+	}
+	if mock.putInput != nil {
+		t.Fatal("PutObject should not be called when content type is invalid")
+	}
+}
+
+type mockS3Client struct {
+	putCalls int
+	putErr   error
+	getErr   error
+}
+
+func (m *mockS3Client) GetObject(_ context.Context, _ *s3.GetObjectInput, _ ...func(*s3.Options)) (*s3.GetObjectOutput, error) {
+	return nil, m.getErr
+}
+
+func (m *mockS3Client) PutObject(_ context.Context, _ *s3.PutObjectInput, _ ...func(*s3.Options)) (*s3.PutObjectOutput, error) {
+	m.putCalls++
+	return &s3.PutObjectOutput{}, m.putErr
+}
+
+func (m *mockS3Client) HeadBucket(_ context.Context, _ *s3.HeadBucketInput, _ ...func(*s3.Options)) (*s3.HeadBucketOutput, error) {
+	return &s3.HeadBucketOutput{}, nil
+}
+
+type mockS3Uploader struct {
+	calls int
+	err   error
+}
+
+func (m *mockS3Uploader) Upload(_ context.Context, _ *s3.PutObjectInput, _ ...func(*manager.Uploader)) (*manager.UploadOutput, error) {
+	m.calls++
+	return &manager.UploadOutput{}, m.err
+}
+
+func TestS3CachePutFileSmall(t *testing.T) {
+	tmp := t.TempDir()
+	path := tmp + "/small.bin"
+	data := make([]byte, 1024) // 1 KiB
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	mockClient := &mockS3Client{}
+	mockUploader := &mockS3Uploader{}
+	c := NewS3CacheWithMultipart(mockClient, "bucket", mockUploader, 5*1024*1024)
+
+	if err := c.PutFile(context.Background(), "key/small", path, "image/webp"); err != nil {
+		t.Fatalf("PutFile error: %v", err)
+	}
+	if mockClient.putCalls != 1 {
+		t.Fatalf("PutObject calls = %d, want 1 (small file)", mockClient.putCalls)
+	}
+	if mockUploader.calls != 0 {
+		t.Fatalf("Upload calls = %d, want 0 (small file)", mockUploader.calls)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("temp file not removed after PutFile")
+	}
+}
+
+func TestS3CachePutFileLarge(t *testing.T) {
+	tmp := t.TempDir()
+	path := tmp + "/large.bin"
+	data := make([]byte, 6*1024*1024) // 6 MiB
+	if err := os.WriteFile(path, data, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	mockClient := &mockS3Client{}
+	mockUploader := &mockS3Uploader{}
+	c := NewS3CacheWithMultipart(mockClient, "bucket", mockUploader, 5*1024*1024)
+
+	if err := c.PutFile(context.Background(), "key/large", path, "image/avif"); err != nil {
+		t.Fatalf("PutFile error: %v", err)
+	}
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatal("temp file not removed after PutFile")
 	}
 }

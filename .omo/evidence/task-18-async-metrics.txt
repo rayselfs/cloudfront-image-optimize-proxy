@@ -1,0 +1,54 @@
+=== RUN   TestWrapAsyncPutReturnsImmediately
+--- PASS: TestWrapAsyncPutReturnsImmediately (0.00s)
+=== RUN   TestWrapAsyncPutDelegatesData
+--- PASS: TestWrapAsyncPutDelegatesData (0.00s)
+=== RUN   TestWrapAsyncPutGetPassThrough
+--- PASS: TestWrapAsyncPutGetPassThrough (0.00s)
+=== RUN   TestWrapAsyncPutWait
+--- PASS: TestWrapAsyncPutWait (0.00s)
+=== RUN   TestWrapAsyncPutCustomConcurrency
+--- PASS: TestWrapAsyncPutCustomConcurrency (0.00s)
+=== RUN   TestWrapAsyncPutDefaults
+--- PASS: TestWrapAsyncPutDefaults (0.00s)
+=== RUN   TestAsyncPutCacheKeyRedaction
+--- PASS: TestAsyncPutCacheKeyRedaction (0.00s)
+=== RUN   TestAsyncPutDroppedWhenPoolFull
+--- PASS: TestAsyncPutDroppedWhenPoolFull (0.00s)
+=== RUN   TestAsyncPutTimeoutExpires
+--- PASS: TestAsyncPutTimeoutExpires (0.00s)
+=== RUN   TestAsyncPutWaitDrainsAll
+--- PASS: TestAsyncPutWaitDrainsAll (0.00s)
+=== RUN   TestInflightGaugeIncrementDecrement
+--- PASS: TestInflightGaugeIncrementDecrement (0.05s)
+=== RUN   TestDroppedCounterIncrements
+--- PASS: TestDroppedCounterIncrements (0.01s)
+=== RUN   TestKeyFromRequest
+--- PASS: TestKeyFromRequest (0.00s)
+=== RUN   TestCacheHit
+--- PASS: TestCacheHit (0.00s)
+=== RUN   TestCacheMiss
+--- PASS: TestCacheMiss (0.00s)
+=== RUN   TestCachePut
+--- PASS: TestCachePut (0.00s)
+=== RUN   TestS3CachePutInvalidContentType
+--- PASS: TestS3CachePutInvalidContentType (0.00s)
+=== RUN   TestS3CachePutFileSmall
+--- PASS: TestS3CachePutFileSmall (0.00s)
+=== RUN   TestS3CachePutFileLarge
+--- PASS: TestS3CachePutFileLarge (0.01s)
+PASS
+coverage: 80.6% of statements
+ok  	github.com/rayselfs/cloudfront-image-optimize-proxy/internal/cache	(cached)	coverage: 80.6% of statements
+=== RUN   TestCounterIncrement
+--- PASS: TestCounterIncrement (0.00s)
+=== RUN   TestReset
+--- PASS: TestReset (0.00s)
+=== RUN   TestGoMetricsPresent
+--- PASS: TestGoMetricsPresent (0.00s)
+=== RUN   TestHistogramObservation
+--- PASS: TestHistogramObservation (0.00s)
+=== RUN   TestHistogramLabels
+--- PASS: TestHistogramLabels (0.00s)
+PASS
+coverage: 82.9% of statements
+ok  	github.com/rayselfs/cloudfront-image-optimize-proxy/internal/metrics	(cached)	coverage: 82.9% of statements

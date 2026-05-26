@@ -25,9 +25,27 @@ hpa:
     #   - type: Percent
     #     value: 10
     #     periodSeconds: 60
+  customMetrics: []
+    # Example custom metric (requires prometheus-adapter or KEDA):
+    # - type: Pods
+    #   pods:
+    #     metric:
+    #       name: http_request_duration_seconds_p95
+    #     target:
+    #       type: AverageValue
+    #       averageValue: "2"
+
+networkPolicy:
+  enabled: false
+  # Ingress from load balancer (NLB) and monitoring scraper
+  ingressFromCIDRs: []
+  #   - 10.0.0.0/8
+  # Egress to S3, imgproxy sidecar, and upstream gateways
+  egressToS3: true
+  egressToDNS: true
 
 podDisruptionBudget:
-  enabled: false
+  enabled: true
   minAvailable: 1
   # maxUnavailable: 1  # mutually exclusive with minAvailable
 
@@ -38,17 +56,18 @@ tolerations: []
 # Merged with the HA-generated podAntiAffinity when ha.enabled is true.
 affinity: {}
 
-podSecurityContext: {}
-  # runAsNonRoot: true
-  # runAsUser: 1000
-  # fsGroup: 1000
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 65534
+  fsGroup: 65534
 
 # securityContext for the proxy container.
-securityContext: {}
-  # allowPrivilegeEscalation: false
-  # capabilities:
-  #   drop: [ALL]
-  # readOnlyRootFilesystem: true
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: false  # false because handler writes temp files to /tmp
+  capabilities:
+    drop:
+      - ALL
 
 revisionHistoryLimit: 1
 
@@ -97,6 +116,10 @@ service:
     service.beta.kubernetes.io/aws-load-balancer-type: external
     service.beta.kubernetes.io/aws-load-balancer-scheme: internal
     service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: ip
+    # VPC Origin requires a security group on the NLB so CloudFront's service-managed
+    # ENI can reach it. Override per environment with the SG that allows inbound port 80
+    # from the CloudFront VPC Origins managed prefix list (pl-*).
+    # service.beta.kubernetes.io/aws-load-balancer-security-groups: sg-xxxxxxxxxxxxxxxxx
 
 config:
   listenAddr: ":8080"
@@ -105,6 +128,16 @@ config:
   maxWidth: "1920"
   upstreamTimeout: "30"
   imgproxyTimeout: "30"
+  shutdownTimeout: "25"  # seconds; must be < terminationGracePeriodSeconds
+  imgproxyUrl: "http://localhost:8081"
+  asyncCachePutConcurrency: "32"
+  asyncCachePutTimeoutSeconds: "30"
+  allowedUpstreamGateways: ""
+  allowedSourceBuckets: ""  # comma-separated
+  defaultQuality: "75"
+
+originVerify:
+  secretName: ""
 
 resources:
   requests:
@@ -113,3 +146,40 @@ resources:
   limits:
     cpu: 500m
     memory: 512Mi
+
+extraManifests: []
+# - apiVersion: v1
+#   kind: Secret
+#   metadata:
+#     name: image-optimize-proxy-origin-verify
+#   type: Opaque
+#   stringData:
+#     CF_ORIGIN_SECRET: "your-secret-here"
+#
+# - apiVersion: external-secrets.io/v1beta1
+#   kind: ExternalSecret
+#   metadata:
+#     name: image-optimize-proxy-origin-verify
+#   spec:
+#     refreshInterval: 1h
+#     secretStoreRef:
+#       name: aws-secrets-manager
+#       kind: ClusterSecretStore
+#     target:
+#       name: image-optimize-proxy-origin-verify
+#     data:
+#       - secretKey: CF_ORIGIN_SECRET
+#         remoteRef:
+#           key: /image-optimize-proxy/origin-verify
+
+serviceMonitor:
+  enabled: false
+  namespace: ""          # defaults to release namespace if empty
+  interval: "30s"
+  scrapeTimeout: "10s"
+  labels: {}             # additional labels for ServiceMonitor
+
+prometheusRule:
+  enabled: false
+  namespace: ""          # defaults to release namespace if empty
+  labels: {}             # additional labels for PrometheusRule

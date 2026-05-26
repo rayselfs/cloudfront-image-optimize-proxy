@@ -1,0 +1,41 @@
+SECURITY FIXES A3 & A5 - TEST EVIDENCE
+======================================
+
+## A3: X-Request-Id Validation
+
+### Changes:
+- Added isValidRequestID() helper in internal/middleware/correlation_id.go
+  - Validates max length: 128 chars
+  - Validates allowed chars: alphanumeric, hyphens, underscores only
+  - No regex dependency (character-by-character loop)
+- Updated CorrelationID middleware to validate before using header value
+- Added test TestCorrelationIDInvalidIDRejected to verify invalid IDs are rejected
+
+### Test Results:
+✓ TestCorrelationIDForwarded - PASS (valid ID "test-123" forwarded)
+✓ TestCorrelationIDGenerated - PASS (missing ID generates new one)
+✓ TestCorrelationIDInvalidIDRejected - PASS (invalid ID "../../../../etc/passwd" rejected, new ID generated)
+
+## A5: Config Validation (ImgproxyURL)
+
+### Changes:
+- Added net/url import to internal/config/config.go
+- Updated Validate() method to validate ImgproxyURL:
+  - Must be a valid URI per url.ParseRequestURI()
+  - Must start with "http" (http or https)
+- Added test TestInvalidImgproxyURL with 5 test cases
+
+### Test Results:
+✓ TestInvalidImgproxyURL/valid_http - PASS
+✓ TestInvalidImgproxyURL/valid_https - PASS
+✓ TestInvalidImgproxyURL/invalid_ftp_scheme - PASS (rejected)
+✓ TestInvalidImgproxyURL/invalid_no_scheme - PASS (rejected)
+✓ TestInvalidImgproxyURL/invalid_malformed - PASS (rejected)
+
+## Full Test Suite Results:
+All 100+ tests PASS
+Coverage: 84.2% (middleware), 98.7% (config)
+No type errors, no suppressed errors
+
+## Verification:
+make test: PASS

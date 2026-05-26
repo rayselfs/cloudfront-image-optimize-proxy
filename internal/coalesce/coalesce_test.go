@@ -1,6 +1,7 @@
 package coalesce
 
 import (
+	"context"
 	"errors"
 	"sync"
 	"sync/atomic"
@@ -26,7 +27,7 @@ func TestConcurrentDedup(t *testing.T) {
 
 	var wg sync.WaitGroup
 	results := make([]interface{}, numGoroutines)
-	errors := make([]error, numGoroutines)
+	errs := make([]error, numGoroutines)
 	shared := make([]bool, numGoroutines)
 
 	for i := 0; i < numGoroutines; i++ {
@@ -34,7 +35,7 @@ func TestConcurrentDedup(t *testing.T) {
 		go func(idx int) {
 			defer wg.Done()
 			<-ready
-			results[idx], errors[idx], shared[idx] = c.Do("same-key", fn)
+			results[idx], errs[idx], shared[idx] = c.Do(context.Background(), "same-key", fn)
 		}(i)
 	}
 
@@ -51,8 +52,8 @@ func TestConcurrentDedup(t *testing.T) {
 		if results[i] != "result" {
 			t.Errorf("goroutine %d: expected result 'result', got %v", i, results[i])
 		}
-		if errors[i] != nil {
-			t.Errorf("goroutine %d: expected no error, got %v", i, errors[i])
+		if errs[i] != nil {
+			t.Errorf("goroutine %d: expected no error, got %v", i, errs[i])
 		}
 	}
 
@@ -90,13 +91,13 @@ func TestDifferentKeys(t *testing.T) {
 	go func() {
 		defer wg.Done()
 		<-ready
-		result1, err1, _ = c.Do("key1", fn1)
+		result1, err1, _ = c.Do(context.Background(), "key1", fn1)
 	}()
 
 	go func() {
 		defer wg.Done()
 		<-ready
-		result2, err2, _ = c.Do("key2", fn2)
+		result2, err2, _ = c.Do(context.Background(), "key2", fn2)
 	}()
 
 	close(ready)
@@ -134,14 +135,14 @@ func TestErrorPropagation(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	errors := make([]error, 3)
+	errs := make([]error, 3)
 
 	for i := 0; i < 3; i++ {
 		wg.Add(1)
 		go func(idx int) {
 			defer wg.Done()
 			<-ready
-			_, errors[idx], _ = c.Do("error-key", fn)
+			_, errs[idx], _ = c.Do(context.Background(), "error-key", fn)
 		}(i)
 	}
 
@@ -149,8 +150,33 @@ func TestErrorPropagation(t *testing.T) {
 	wg.Wait()
 
 	for i := 0; i < 3; i++ {
-		if errors[i] != testErr {
-			t.Errorf("goroutine %d: expected error %v, got %v", i, testErr, errors[i])
+		if errs[i] != testErr {
+			t.Errorf("goroutine %d: expected error %v, got %v", i, testErr, errs[i])
 		}
+	}
+}
+
+// TestContextCancellation verifies that a cancelled context returns ctx.Err()
+// without waiting for the underlying function to complete.
+func TestContextCancellation(t *testing.T) {
+	c := New()
+
+	block := make(chan struct{})
+	fn := func() (interface{}, error) {
+		<-block
+		return "result", nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // already cancelled
+
+	_, err, _ := c.Do(ctx, "cancel-key", fn)
+	close(block) // unblock any goroutine that may have started
+
+	if err == nil {
+		t.Fatal("expected error from cancelled context, got nil")
+	}
+	if !errors.Is(err, context.Canceled) {
+		t.Errorf("expected context.Canceled, got %v", err)
 	}
 }

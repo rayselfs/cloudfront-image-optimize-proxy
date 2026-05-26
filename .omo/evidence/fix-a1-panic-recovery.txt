@@ -1,0 +1,33 @@
+## Evidence: feat(middleware): add panic recovery middleware
+
+### Files Changed
+- internal/middleware/panic_recovery.go (new)
+- internal/middleware/panic_recovery_test.go (new)
+- cmd/server/main.go (line 133: wrapped with middleware.Recovery)
+
+### make test
+All new tests pass:
+  PASS: TestRecoveryFromPanic
+  PASS: TestRecoveryNoPanic
+
+Pre-existing failure (unrelated to this change):
+  FAIL: TestResolveGatewayFileSchemeRejected (internal/upstream)
+  - error message mismatch: got "X-Img-Upstream-Gateway has invalid value", want "not allowed"
+  - This test was failing before this change
+
+### make build
+go build -o bin/image-optimize-proxy ./cmd/server/
+(exit 0)
+
+### Middleware chain (cmd/server/main.go:133)
+middleware.Recovery(
+  middleware.CorrelationID(
+    middleware.Tracing(
+      middleware.SecurityHeaders(
+        middleware.Logging(
+          middleware.CloudFrontVerify(cfg.OriginSecrets)(mux)
+        )
+      )
+    )
+  )
+)

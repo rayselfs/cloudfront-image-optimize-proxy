@@ -1,6 +1,9 @@
 package config
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestDefaultConfig(t *testing.T) {
 	t.Setenv("LISTEN_ADDR", "")
@@ -8,6 +11,8 @@ func TestDefaultConfig(t *testing.T) {
 	t.Setenv("CACHE_S3_BUCKET", "source-images")
 	t.Setenv("CACHE_S3_REGION", "")
 	t.Setenv("MAX_WIDTH", "")
+	t.Setenv("ALLOWED_UPSTREAM_GATEWAYS", "upstream.com")
+	t.Setenv("ALLOWED_SOURCE_BUCKETS", "source-bucket")
 
 	cfg, err := Load()
 	if err != nil {
@@ -33,6 +38,8 @@ func TestDefaultConfig(t *testing.T) {
 
 func TestRequiredCacheS3Bucket(t *testing.T) {
 	t.Setenv("CACHE_S3_BUCKET", "")
+	t.Setenv("ALLOWED_UPSTREAM_GATEWAYS", "upstream.com")
+	t.Setenv("ALLOWED_SOURCE_BUCKETS", "source-bucket")
 
 	if _, err := Load(); err == nil {
 		t.Fatal("Load() error = nil, want error")
@@ -45,6 +52,8 @@ func TestCustomConfig(t *testing.T) {
 	t.Setenv("CACHE_S3_BUCKET", "custom-bucket")
 	t.Setenv("CACHE_S3_REGION", "ap-northeast-1")
 	t.Setenv("MAX_WIDTH", "2048")
+	t.Setenv("ALLOWED_UPSTREAM_GATEWAYS", "upstream.com")
+	t.Setenv("ALLOWED_SOURCE_BUCKETS", "source-bucket")
 
 	cfg, err := Load()
 	if err != nil {
@@ -65,5 +74,292 @@ func TestCustomConfig(t *testing.T) {
 	}
 	if cfg.MaxWidth != 2048 {
 		t.Fatalf("MaxWidth = %d, want %d", cfg.MaxWidth, 2048)
+	}
+}
+
+func TestLoadCSV_Empty(t *testing.T) {
+	t.Setenv("CF_ORIGIN_SECRET", "")
+	t.Setenv("CACHE_S3_BUCKET", "test-bucket")
+	t.Setenv("ALLOWED_UPSTREAM_GATEWAYS", "upstream.com")
+	t.Setenv("ALLOWED_SOURCE_BUCKETS", "source-bucket")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.OriginSecrets) != 0 {
+		t.Fatalf("OriginSecrets = %v, want empty", cfg.OriginSecrets)
+	}
+}
+
+func TestLoadCSV_Single(t *testing.T) {
+	t.Setenv("CF_ORIGIN_SECRET", "mysecret")
+	t.Setenv("CACHE_S3_BUCKET", "test-bucket")
+	t.Setenv("ALLOWED_UPSTREAM_GATEWAYS", "upstream.com")
+	t.Setenv("ALLOWED_SOURCE_BUCKETS", "source-bucket")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.OriginSecrets) != 1 || cfg.OriginSecrets[0] != "mysecret" {
+		t.Fatalf("OriginSecrets = %v, want [mysecret]", cfg.OriginSecrets)
+	}
+}
+
+func TestLoadCSV_Multiple(t *testing.T) {
+	t.Setenv("CF_ORIGIN_SECRET", "new-secret,old-secret")
+	t.Setenv("CACHE_S3_BUCKET", "test-bucket")
+	t.Setenv("ALLOWED_UPSTREAM_GATEWAYS", "upstream.com")
+	t.Setenv("ALLOWED_SOURCE_BUCKETS", "source-bucket")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.OriginSecrets) != 2 {
+		t.Fatalf("OriginSecrets len = %d, want 2", len(cfg.OriginSecrets))
+	}
+	if cfg.OriginSecrets[0] != "new-secret" || cfg.OriginSecrets[1] != "old-secret" {
+		t.Fatalf("OriginSecrets = %v, want [new-secret old-secret]", cfg.OriginSecrets)
+	}
+}
+
+func TestLoadCSV_AllowedGateways(t *testing.T) {
+	t.Setenv("ALLOWED_UPSTREAM_GATEWAYS", "api.example.com,cdn.example.com")
+	t.Setenv("CACHE_S3_BUCKET", "test-bucket")
+	t.Setenv("ALLOWED_SOURCE_BUCKETS", "source-bucket")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.AllowedUpstreamGateways) != 2 {
+		t.Fatalf("AllowedUpstreamGateways len = %d, want 2", len(cfg.AllowedUpstreamGateways))
+	}
+	if cfg.AllowedUpstreamGateways[0] != "api.example.com" || cfg.AllowedUpstreamGateways[1] != "cdn.example.com" {
+		t.Fatalf("AllowedUpstreamGateways = %v, want [api.example.com cdn.example.com]", cfg.AllowedUpstreamGateways)
+	}
+}
+
+func TestLoadCSV_TrimsWhitespace(t *testing.T) {
+	t.Setenv("CF_ORIGIN_SECRET", " secret-a , secret-b ")
+	t.Setenv("CACHE_S3_BUCKET", "test-bucket")
+	t.Setenv("ALLOWED_UPSTREAM_GATEWAYS", "upstream.com")
+	t.Setenv("ALLOWED_SOURCE_BUCKETS", "source-bucket")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if len(cfg.OriginSecrets) != 2 {
+		t.Fatalf("OriginSecrets len = %d, want 2", len(cfg.OriginSecrets))
+	}
+	if cfg.OriginSecrets[0] != "secret-a" || cfg.OriginSecrets[1] != "secret-b" {
+		t.Fatalf("OriginSecrets = %v, want trimmed values", cfg.OriginSecrets)
+	}
+}
+
+func TestAllowlistValidation(t *testing.T) {
+	tests := []struct {
+		name                    string
+		allowedUpstreamGateways string
+		allowedSourceBuckets    string
+		wantErr                 bool
+	}{
+		{
+			name:                    "both allowlists set",
+			allowedUpstreamGateways: "api.example.com",
+			allowedSourceBuckets:    "my-bucket",
+			wantErr:                 false,
+		},
+		{
+			name:                 "gateways empty",
+			allowedSourceBuckets: "my-bucket",
+			wantErr:              true,
+		},
+		{
+			name:                    "buckets empty",
+			allowedUpstreamGateways: "api.example.com",
+			wantErr:                 true,
+		},
+		{
+			name:    "both empty",
+			wantErr: true,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CACHE_S3_BUCKET", "test-bucket")
+			t.Setenv("ALLOWED_UPSTREAM_GATEWAYS", tc.allowedUpstreamGateways)
+			t.Setenv("ALLOWED_SOURCE_BUCKETS", tc.allowedSourceBuckets)
+
+			_, err := Load()
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("Load() error = %v, wantErr = %v", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestAsyncCachePutConcurrencyZeroRejected(t *testing.T) {
+	t.Setenv("CACHE_S3_BUCKET", "test-bucket")
+	t.Setenv("ASYNC_CACHE_PUT_CONCURRENCY", "0")
+	t.Setenv("ALLOWED_UPSTREAM_GATEWAYS", "upstream.com")
+	t.Setenv("ALLOWED_SOURCE_BUCKETS", "source-bucket")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want error for ASYNC_CACHE_PUT_CONCURRENCY=0")
+	}
+}
+
+func TestAsyncCachePutTimeoutZeroRejected(t *testing.T) {
+	t.Setenv("CACHE_S3_BUCKET", "test-bucket")
+	t.Setenv("ASYNC_CACHE_PUT_TIMEOUT_SECONDS", "0")
+	t.Setenv("ALLOWED_UPSTREAM_GATEWAYS", "upstream.com")
+	t.Setenv("ALLOWED_SOURCE_BUCKETS", "source-bucket")
+
+	_, err := Load()
+	if err == nil {
+		t.Fatal("Load() error = nil, want error for ASYNC_CACHE_PUT_TIMEOUT_SECONDS=0")
+	}
+}
+
+func TestAsyncCachePutCustomValues(t *testing.T) {
+	t.Setenv("CACHE_S3_BUCKET", "test-bucket")
+	t.Setenv("ASYNC_CACHE_PUT_CONCURRENCY", "8")
+	t.Setenv("ASYNC_CACHE_PUT_TIMEOUT_SECONDS", "60")
+	t.Setenv("ALLOWED_UPSTREAM_GATEWAYS", "upstream.com")
+	t.Setenv("ALLOWED_SOURCE_BUCKETS", "source-bucket")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+	if cfg.AsyncCachePutConcurrency != 8 {
+		t.Fatalf("AsyncCachePutConcurrency = %d, want 8", cfg.AsyncCachePutConcurrency)
+	}
+	if cfg.AsyncCachePutTimeout != 60*time.Second {
+		t.Fatalf("AsyncCachePutTimeout = %v, want 60s", cfg.AsyncCachePutTimeout)
+	}
+}
+
+func TestLoadInvalidSettings(t *testing.T) {
+	tests := []struct {
+		name   string
+		envVar string
+		value  string
+	}{
+		// MAX_WIDTH invalid values
+		{"MAX_WIDTH=0", "MAX_WIDTH", "0"},
+		{"MAX_WIDTH=-1", "MAX_WIDTH", "-1"},
+		{"MAX_WIDTH=abc", "MAX_WIDTH", "abc"},
+		// UPSTREAM_TIMEOUT invalid values
+		{"UPSTREAM_TIMEOUT=0", "UPSTREAM_TIMEOUT", "0"},
+		{"UPSTREAM_TIMEOUT=-1", "UPSTREAM_TIMEOUT", "-1"},
+		{"UPSTREAM_TIMEOUT=abc", "UPSTREAM_TIMEOUT", "abc"},
+		// IMGPROXY_TIMEOUT invalid values
+		{"IMGPROXY_TIMEOUT=0", "IMGPROXY_TIMEOUT", "0"},
+		// SHUTDOWN_TIMEOUT invalid values
+		{"SHUTDOWN_TIMEOUT=0", "SHUTDOWN_TIMEOUT", "0"},
+		// ASYNC_CACHE_PUT_CONCURRENCY invalid values
+		{"ASYNC_CACHE_PUT_CONCURRENCY=0", "ASYNC_CACHE_PUT_CONCURRENCY", "0"},
+		{"ASYNC_CACHE_PUT_CONCURRENCY=-1", "ASYNC_CACHE_PUT_CONCURRENCY", "-1"},
+		// ASYNC_CACHE_PUT_TIMEOUT_SECONDS invalid values
+		{"ASYNC_CACHE_PUT_TIMEOUT_SECONDS=0", "ASYNC_CACHE_PUT_TIMEOUT_SECONDS", "0"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CACHE_S3_BUCKET", "test")
+			t.Setenv("ALLOWED_UPSTREAM_GATEWAYS", "upstream.com")
+			t.Setenv("ALLOWED_SOURCE_BUCKETS", "source-bucket")
+			t.Setenv(tc.envVar, tc.value)
+
+			_, err := Load()
+			if err == nil {
+				t.Fatalf("Load() error = nil, want error for %s=%s", tc.envVar, tc.value)
+			}
+		})
+	}
+}
+
+func TestLoadValidSettings(t *testing.T) {
+	tests := []struct {
+		name                         string
+		maxWidth                     string
+		upstreamTimeout              string
+		asyncCachePutConcurrency     string
+		wantMaxWidth                 int
+		wantUpstreamTimeout          time.Duration
+		wantAsyncCachePutConcurrency int
+	}{
+		{
+			name:                         "custom valid values",
+			maxWidth:                     "640",
+			upstreamTimeout:              "10",
+			asyncCachePutConcurrency:     "16",
+			wantMaxWidth:                 640,
+			wantUpstreamTimeout:          10 * time.Second,
+			wantAsyncCachePutConcurrency: 16,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CACHE_S3_BUCKET", "test")
+			t.Setenv("ALLOWED_UPSTREAM_GATEWAYS", "upstream.com")
+			t.Setenv("ALLOWED_SOURCE_BUCKETS", "source-bucket")
+			t.Setenv("MAX_WIDTH", tc.maxWidth)
+			t.Setenv("UPSTREAM_TIMEOUT", tc.upstreamTimeout)
+			t.Setenv("ASYNC_CACHE_PUT_CONCURRENCY", tc.asyncCachePutConcurrency)
+
+			cfg, err := Load()
+			if err != nil {
+				t.Fatalf("Load() error = %v", err)
+			}
+			if cfg.MaxWidth != tc.wantMaxWidth {
+				t.Fatalf("MaxWidth = %d, want %d", cfg.MaxWidth, tc.wantMaxWidth)
+			}
+			if cfg.UpstreamTimeout != tc.wantUpstreamTimeout {
+				t.Fatalf("UpstreamTimeout = %v, want %v", cfg.UpstreamTimeout, tc.wantUpstreamTimeout)
+			}
+			if cfg.AsyncCachePutConcurrency != tc.wantAsyncCachePutConcurrency {
+				t.Fatalf("AsyncCachePutConcurrency = %d, want %d", cfg.AsyncCachePutConcurrency, tc.wantAsyncCachePutConcurrency)
+			}
+		})
+	}
+}
+
+func TestInvalidImgproxyURL(t *testing.T) {
+	tests := []struct {
+		name        string
+		imgproxyURL string
+		shouldFail  bool
+	}{
+		{"valid http", "http://localhost:8081", false},
+		{"valid https", "https://imgproxy.example.com", false},
+		{"invalid ftp scheme", "ftp://host", true},
+		{"invalid no scheme", "localhost:8081", true},
+		{"invalid malformed", "not-a-url", true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Setenv("CACHE_S3_BUCKET", "test-bucket")
+			t.Setenv("ALLOWED_UPSTREAM_GATEWAYS", "upstream.com")
+			t.Setenv("ALLOWED_SOURCE_BUCKETS", "source-bucket")
+			t.Setenv("IMGPROXY_URL", tc.imgproxyURL)
+
+			_, err := Load()
+			if tc.shouldFail && err == nil {
+				t.Fatalf("Load() error = nil, want error for IMGPROXY_URL=%q", tc.imgproxyURL)
+			}
+			if !tc.shouldFail && err != nil {
+				t.Fatalf("Load() error = %v, want nil for IMGPROXY_URL=%q", err, tc.imgproxyURL)
+			}
+		})
 	}
 }

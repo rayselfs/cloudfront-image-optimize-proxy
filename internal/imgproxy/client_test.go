@@ -16,9 +16,9 @@ func TestBuildURL(t *testing.T) {
 		params   TransformParams
 		wantSufx string
 	}{
-		{"webp", TransformParams{Width: 800, Format: "webp", Quality: 85}, "/unsafe/rs:fit:800/q:85/webp/plain/http://example.com/img.png"},
-		{"avif", TransformParams{Width: 400, Format: "avif", Quality: 70}, "/unsafe/rs:fit:400/q:70/avif/plain/http://example.com/img.png"},
-		{"jpeg to jpg", TransformParams{Width: 1200, Format: "jpeg", Quality: 90}, "/unsafe/rs:fit:1200/q:90/jpg/plain/http://example.com/img.png"},
+		{"webp", TransformParams{Width: 800, Format: "webp", Quality: 85}, "/unsafe/rs:fit:800/q:85/webp/plain/http:%2F%2Fexample.com%2Fimg.png"},
+		{"avif", TransformParams{Width: 400, Format: "avif", Quality: 70}, "/unsafe/rs:fit:400/q:70/avif/plain/http:%2F%2Fexample.com%2Fimg.png"},
+		{"jpeg to jpg", TransformParams{Width: 1200, Format: "jpeg", Quality: 90}, "/unsafe/rs:fit:1200/q:90/jpg/plain/http:%2F%2Fexample.com%2Fimg.png"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -26,6 +26,55 @@ func TestBuildURL(t *testing.T) {
 			want := "http://localhost:8081" + tc.wantSufx
 			if got != want {
 				t.Errorf("got %q, want %q", got, want)
+			}
+		})
+	}
+}
+
+func TestBuildURLEscaping(t *testing.T) {
+	tests := []struct {
+		name        string
+		sourceURL   string
+		wantEncoded string
+	}{
+		{
+			name:        "space in source URL",
+			sourceURL:   "https://example.com/image file.jpg",
+			wantEncoded: "https:%2F%2Fexample.com%2Fimage%20file.jpg",
+		},
+		{
+			name:        "percent in source URL",
+			sourceURL:   "https://example.com/img%20x.jpg",
+			wantEncoded: "https:%2F%2Fexample.com%2Fimg%2520x.jpg",
+		},
+		{
+			name:        "query string in source URL",
+			sourceURL:   "https://s3.amazonaws.com/bucket/img.jpg?X-Amz-Signature=a/b",
+			wantEncoded: "https:%2F%2Fs3.amazonaws.com%2Fbucket%2Fimg.jpg%3FX-Amz-Signature=a%2Fb",
+		},
+		{
+			name:        "slash in source URL path",
+			sourceURL:   "https://example.com/path/to/image.jpg",
+			wantEncoded: "https:%2F%2Fexample.com%2Fpath%2Fto%2Fimage.jpg",
+		},
+		{
+			name:        "Unicode in source URL",
+			sourceURL:   "https://example.com/图片.jpg",
+			wantEncoded: "https:%2F%2Fexample.com%2F%E5%9B%BE%E7%89%87.jpg",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := buildProcessingURL("http://localhost:8081", tc.sourceURL, TransformParams{Width: 800, Format: "webp", Quality: 85})
+
+			if !strings.HasSuffix(got, "/plain/"+tc.wantEncoded) {
+				t.Errorf("got %q, want suffix /plain/%s", got, tc.wantEncoded)
+			}
+
+			plainIdx := strings.Index(got, "/plain/")
+			if plainIdx != -1 && strings.Contains(got[plainIdx+7:], "?") {
+				t.Errorf("raw '?' found after /plain/ in: %s", got)
 			}
 		})
 	}
@@ -70,6 +119,22 @@ func TestTransformError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "500") {
 		t.Errorf("error should mention status 500, got: %v", err)
+	}
+}
+
+func TestNewClientWithTransport(t *testing.T) {
+	c := NewClientWithTransport("http://localhost:8081", 5*time.Second, nil)
+	if c.httpClient.Timeout != 5*time.Second {
+		t.Fatalf("timeout = %v, want 5s", c.httpClient.Timeout)
+	}
+	if c.httpClient.Transport != nil {
+		t.Fatalf("expected nil transport (uses default), got %T", c.httpClient.Transport)
+	}
+
+	tr := &http.Transport{}
+	c2 := NewClientWithTransport("http://localhost:8081", 5*time.Second, tr)
+	if c2.httpClient.Transport != tr {
+		t.Fatalf("transport not wired through")
 	}
 }
 

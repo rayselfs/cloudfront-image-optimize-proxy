@@ -1,0 +1,25 @@
+=== RUN   TestParseParams
+=== RUN   TestParseParams/no_optimize_params
+=== RUN   TestParseParams/missing_format
+=== RUN   TestParseParams/invalid_width
+=== RUN   TestParseParams/default_quality
+=== RUN   TestParseParams/clamps_low_quality
+=== RUN   TestParseParams/clamps_high_quality
+=== RUN   TestParseParams/invalid_quality_negative
+=== RUN   TestParseParams/unsupported_format
+=== RUN   TestParseParams/invalid_quality_non-numeric
+--- PASS: TestParseParams (0.00s)
+    --- PASS: TestParseParams/no_optimize_params (0.00s)
+    --- PASS: TestParseParams/missing_format (0.00s)
+    --- PASS: TestParseParams/invalid_width (0.00s)
+    --- PASS: TestParseParams/default_quality (0.00s)
+    --- PASS: TestParseParams/clamps_low_quality (0.00s)
+    --- PASS: TestParseParams/clamps_high_quality (0.00s)
+    --- PASS: TestParseParams/invalid_quality_negative (0.00s)
+    --- PASS: TestParseParams/unsupported_format (0.00s)
+    --- PASS: TestParseParams/invalid_quality_non-numeric (0.00s)
+=== RUN   TestIntegrationImgproxyFallback
+2026/05/25 20:04:34 ERROR handler: transform failed, fetching original fallback error="imgproxy: unexpected status 500: imgproxy error" path=/image.jpg
+--- PASS: TestIntegrationImgproxyFallback (0.00s)
+PASS
+ok  	github.com/rayselfs/cloudfront-image-optimize-proxy/internal/handler	(cached)
